@@ -9,6 +9,243 @@ mkdir -p $D
 enabled() { [ "$(uci -q get netmon.main.enabled)" = 1 ]; }
 routerip() { uci -q get network.lan.ipaddr | cut -d/ -f1; }
 
+# ---------------------------------------------------------------- per-device traffic (nftables counters)
+# Counters sit at prerouting (device -> out, counted BEFORE the proxy redirect) and postrouting (-> device, counted
+# AFTER nat), so traffic that is handed to the local proxy is counted too; a forward hook would miss it.
+# The sets are dynamic: a device gets its own counter the first time it sends a packet.
+TAB=$(printf '\t')
+# small files that must survive a reboot live in flash (/etc); they are written rarely and are listed in sysupgrade.conf
+ALIAS=/etc/netmon-alias.tsv       # mac <TAB> name chosen by the user
+SEEN=/etc/netmon-seen.tsv         # mac <TAB> first seen (epoch; 0 = already there when this was first switched on)
+QUOTA=/etc/netmon-quota.tsv       # mac <TAB> daily limit in bytes
+DAILY=/etc/netmon-daily.tsv       # date <TAB> mac <TAB> up <TAB> down, the last 35 days
+BLOCK=/etc/netmon-block.tsv       # one mac per line: devices that are cut off from the internet
+BUCKET=300                 # history resolution in seconds
+KEEP_H=36                  # hours of history kept (RAM only)
+tr_on() { [ "$(uci -q get netmon.main.traffic)" = 1 ]; }
+tr_installed() { nft list set inet netmon_tr up >/dev/null 2>&1; }
+tr_install() {
+	tr_installed && return 0
+	nft -f - <<'EOF'
+table inet netmon_tr {
+	set up   { type ipv4_addr; flags dynamic; counter; size 1024; }
+	set down { type ipv4_addr; flags dynamic; counter; size 1024; }
+	chain pre {
+		type filter hook prerouting priority -300;
+		iifname "br-lan" add @up { ip saddr }
+	}
+	chain post {
+		type filter hook postrouting priority 300;
+		oifname "br-lan" add @down { ip daddr }
+	}
+}
+EOF
+}
+tr_lock() {
+	w=0
+	while ! mkdir $D/tr.lock 2>/dev/null; do
+		p=$(cat $D/tr.lock/pid 2>/dev/null)
+		if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then rm -rf $D/tr.lock; continue; fi
+		w=$((w + 1)); [ $w -gt 8 ] && return 1
+		sleep 1
+	done
+	echo $$ > $D/tr.lock/pid
+}
+tr_unlock() { rm -rf $D/tr.lock; }
+tz_offset() {      # seconds east of UTC, from "+0800"
+	z=$(date +%z); sgn=${z%${z#?}}; r=${z#?}; h=${r%??}; m=${r#??}; h=${h#0}; m=${m#0}
+	o=$(( ${h:-0} * 3600 + ${m:-0} * 60 )); [ "$sgn" = "-" ] && o=$((0 - o)); echo $o
+}
+# "mac ip name online" for every device we know about (DHCP leases, neighbour table, Wi-Fi association list)
+tr_devinfo() {
+	: > $D/tr.wifi
+	# interface names from /sys (calling "iwinfo" just to list them costs 0.3 s on this CPU)
+	for w in $(ls /sys/class/net 2>/dev/null | grep -E '^phy[0-9]+-ap[0-9]*$'); do
+		iwinfo $w assoclist 2>/dev/null | awk 'tolower($1) ~ /^[0-9a-f][0-9a-f]:/ {print tolower($1)}' >> $D/tr.wifi
+	done
+	ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" && $NF != "FAILED" && $NF != "INCOMPLETE" { print $1 " " tolower($3) " " $NF }' > $D/tr.neigh
+	awk '
+		FILENAME == ARGV[1] { wifi[$1] = 1; next }
+		FILENAME == ARGV[2] { nmac[$1] = $2; nst[$1] = $3; next }
+		{
+			mac = tolower($2); ip = $3; name = ($4 == "*" || $4 == "") ? "-" : $4; seen[ip] = 1
+			on = (mac in wifi) || ((ip in nst) && nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
+			print mac " " ip " " name " " (on ? 1 : 0)
+		}
+		END {
+			for (ip in nmac) if (!(ip in seen)) {
+				on = (nmac[ip] in wifi) || (nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
+				print nmac[ip] " " ip " - " (on ? 1 : 0)
+			}
+		}' $D/tr.wifi $D/tr.neigh /tmp/dhcp.leases 2>/dev/null
+	rm -f $D/tr.wifi $D/tr.neigh
+}
+# device info changes slowly but costs ~0.6 s to collect: reuse it for 15 s
+tr_devinfo_cached() {
+	f=$D/tr.devinfo; n=$(date +%s)
+	if [ -s $f ] && [ $(( n - $(cat $f.ts 2>/dev/null || echo 0) )) -lt 15 ]; then cat $f; return; fi
+	tr_devinfo > $f.new && mv $f.new $f && echo $n > $f.ts
+	cat $f
+}
+tr_update() {
+	tr_on || return 0
+	tr_lock || return 0
+	tr_install
+	now=$(date +%s); bucket=$(( now / BUCKET * BUCKET )); keep=$(( now - KEEP_H * 3600 ))
+	for f in tr.last tr.tot tr.bk; do [ -f $D/$f ] || : > $D/$f; done
+	[ -s $D/tr.since ] || echo $now > $D/tr.since
+	for s in up down; do
+		nft list set inet netmon_tr $s 2>/dev/null | grep -oE '[0-9.]+ counter packets [0-9]+ bytes [0-9]+' | awk '{print $1, $6}' > $D/tr.$s.now
+	done
+	{ awk '{print $3, tolower($2)}' /tmp/dhcp.leases 2>/dev/null; ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" { print $1, tolower($3) }'; } > $D/tr.map
+	: > $D/tr.last.new; : > $D/tr.tot.new; : > $D/tr.bk.new
+	awk -v b="$bucket" -v keep="$keep" -v D="$D" '
+		FILENAME == ARGV[1] { mac[$1] = $2; next }
+		FILENAME == ARGV[2] { lu[$1] = $2; ld[$1] = $3; next }
+		FILENAME == ARGV[3] { cu[$1] = $2; seen[$1] = 1; next }
+		FILENAME == ARGV[4] { cd[$1] = $2; seen[$1] = 1; next }
+		FILENAME == ARGV[5] { tu[$1] = $2; td[$1] = $3; next }
+		FILENAME == ARGV[6] { k = $1 SUBSEP $2; bu[k] = $3; bd[k] = $4; next }
+		END {
+			for (ip in seen) {
+				u = cu[ip] + 0; d = cd[ip] + 0
+				du = u - ((ip in lu) ? lu[ip] + 0 : 0); if (du < 0) du = u       # counter went back: table was recreated
+				dd = d - ((ip in ld) ? ld[ip] + 0 : 0); if (dd < 0) dd = d
+				m = (ip in mac) ? mac[ip] : "ip:" ip
+				if (du || dd) { tu[m] += du; td[m] += dd; k = b SUBSEP m; bu[k] += du; bd[k] += dd }
+				print ip, u, d > (D "/tr.last.new")
+			}
+			for (m in tu) print m, tu[m] + 0, td[m] + 0 > (D "/tr.tot.new")
+			for (k in bu) { split(k, p, SUBSEP); if (p[1] + 0 >= keep) print p[1], p[2], bu[k] + 0, bd[k] + 0 > (D "/tr.bk.new") }
+		}' $D/tr.map $D/tr.last $D/tr.up.now $D/tr.down.now $D/tr.tot $D/tr.bk
+	# a killed awk (low memory) leaves half a file: only a complete result replaces the old state
+	if [ $? = 0 ]; then mv $D/tr.last.new $D/tr.last; mv $D/tr.tot.new $D/tr.tot; mv $D/tr.bk.new $D/tr.bk; else rm -f $D/tr.last.new $D/tr.tot.new $D/tr.bk.new; fi
+	rm -f $D/tr.map $D/tr.up.now $D/tr.down.now
+	tr_unlock
+}
+tr_cron() {
+	grep -q 'netmon tr-update' /etc/crontabs/root 2>/dev/null || echo '* * * * * /usr/bin/netmon tr-update >/dev/null 2>&1' >> /etc/crontabs/root
+	grep -q 'netmon flow-run' /etc/crontabs/root 2>/dev/null || echo '* * * * * /usr/bin/netmon flow-run >/dev/null 2>&1' >> /etc/crontabs/root
+	grep -q 'netmon daily-save' /etc/crontabs/root 2>/dev/null || { echo '2 */4 * * * /usr/bin/netmon daily-save >/dev/null 2>&1'; echo '58 23 * * * /usr/bin/netmon daily-save >/dev/null 2>&1'; } >> /etc/crontabs/root
+	/etc/init.d/cron restart >/dev/null 2>&1
+}
+tr_need_cfg() { uci -q get netmon.main >/dev/null || { touch /etc/config/netmon; uci set netmon.main=netmon; }; }
+tr_range_from() {      # range word or seconds -> start epoch (0 = since the counters started)
+	now=$(date +%s)
+	case "$1" in
+	all) echo 0 ;;
+	today) echo $(( now - ((now + $(tz_offset)) % 86400) )) ;;
+	*[!0-9]*|"") echo $((now - 3600)) ;;
+	*) echo $((now - $1)) ;;
+	esac
+}
+
+# ---------------------------------------------------------------- per-site traffic
+# conntrack keeps byte counters for every flow (also for flows redirected to the local proxy: the original destination
+# stays in the entry, and the reply side comes from <router>:<proxy port>). DNS answers tell which domain a device
+# resolved to that destination IP. Sampling every 30 s and summing the growth per (device, domain) gives per-site traffic.
+FLOW_CAP=6000
+flow_lock() {
+	w=0
+	while ! mkdir $D/flow.lock 2>/dev/null; do
+		p=$(cat $D/flow.lock/pid 2>/dev/null)
+		if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then rm -rf $D/flow.lock; continue; fi
+		w=$((w + 1)); [ $w -gt 3 ] && return 1
+		sleep 1
+	done
+	echo $$ > $D/flow.lock/pid
+}
+flow_sample() {
+	tr_on || return 0
+	[ -r /proc/net/nf_conntrack ] || return 0
+	flow_lock || return 0
+	now=$(date +%s); b10=$(( now / 600 * 600 )); keep=$(( now - 4200 ))
+	base=0; [ -f $D/flow.last ] || base=1           # first sample only sets the baseline: old long-lived flows are not "new traffic"
+	for f in flow.last flow.tot flow.b10 dnsmap.tsv; do [ -f $D/$f ] || : > $D/$f; done
+	{ awk '{print $3, tolower($2)}' /tmp/dhcp.leases 2>/dev/null; ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" { print $1, tolower($3) }'; } > $D/flow.map
+	rip=$(routerip); port=$(uci -q get xray.main.port); port=${port:-7892}
+	lan=$(echo "$rip" | cut -d. -f1-3)
+	# BusyBox awk is slow here (about 1 s just to scan the table field by field), sed is not: boil every LAN flow down to
+	#   proto  src  sport  dst  dport  bytes_out  bytes_back  reply_src  reply_sport   (BusyBox sed knows only ..\9, so at most 9 groups)
+	grep -F " src=$lan." /proc/net/nf_conntrack | sed -n -E 's/^ipv4 +2 (tcp|udp) [^=]*src=([0-9.]+) dst=([0-9.]+) sport=([0-9]+) dport=([0-9]+) packets=[0-9]+ bytes=([0-9]+) [^=]*src=([0-9.]+) dst=[0-9.]+ sport=([0-9]+) dport=[0-9]+ packets=[0-9]+ bytes=([0-9]+).*/\1 \2 \4 \3 \5 \6 \9 \7 \8/p' > $D/flow.ct
+	: > $D/flow.last.new; : > $D/flow.tot.new; : > $D/flow.b10.new
+	awk -v now="$now" -v b10="$b10" -v keep="$keep" -v base="$base" -v rip="$rip" -v port="$port" -v D="$D" '
+		function priv(x,   a) { split(x, a, "."); return (a[1] == 10 || a[1] == 127 || (a[1] == 192 && a[2] == 168) || (a[1] == 172 && a[2] >= 16 && a[2] <= 31) || (a[1] == 169 && a[2] == 254) || a[1] >= 224) }
+		FILENAME == ARGV[1] { mac[$1] = $2; next }
+		FILENAME == ARGV[2] { lo[$1] = $2; lr[$1] = $3; next }
+		FILENAME == ARGV[3] { dm[$1 SUBSEP $2] = $3; dm2[$2] = $3; next }
+		FILENAME == ARGV[4] { k = $1 SUBSEP $2; tu[k] = $3; td[k] = $4; fl[k] = $5; lt[k] = $6; pb[k] = $7; ipl[k] = ($8 == "-" ? "" : $8); next }
+		FILENAME == ARGV[5] { bk = $1 SUBSEP $2 SUBSEP $3; bu[bk] = $4; bd[bk] = $5; bp[bk] = $6; bf[bk] = $7; next }
+		{
+			os = $2; od = $4
+			if (!(os in mac) || priv(od)) next
+			key = $1 ";" os ";" $3 ";" od ";" $5
+			ob = $6 + 0; rb = $7 + 0
+			print key, ob, rb > (D "/flow.last.new")
+			if (base) next
+			isnew = 0
+			if (key in lo) { du = ob - lo[key]; dd = rb - lr[key]; if (du < 0 || dd < 0) { du = ob; dd = rb; isnew = 1 } }
+			else { du = ob; dd = rb; isnew = 1 }
+			if (du == 0 && dd == 0 && !isnew) next
+			dn = ((os SUBSEP od) in dm) ? dm[os SUBSEP od] : ((od in dm2) ? dm2[od] : "ip:" od)
+			k = mac[os] SUBSEP dn
+			bk = b10 SUBSEP k
+			tu[k] += du; td[k] += dd; lt[k] = now; bu[bk] += du; bd[bk] += dd
+			if (isnew) { fl[k]++; bf[bk]++ }
+			if ($8 == rip && $9 == port) { pb[k] += du + dd; bp[bk] += du + dd }
+			if (index("," ipl[k] ",", "," od ",") == 0 && split(ipl[k], tmp, ",") < 3) ipl[k] = (ipl[k] == "" ? od : ipl[k] "," od)
+		}
+		END {
+			for (k in tu) { split(k, p, SUBSEP); print p[1], p[2], tu[k] + 0, td[k] + 0, fl[k] + 0, lt[k] + 0, pb[k] + 0, (ipl[k] == "" ? "-" : ipl[k]) > (D "/flow.tot.new"); px += pb[k]; ab += tu[k] + td[k] }
+				print px + 0, ab + 0 > (D "/flow.px")
+			for (bk in bu) { split(bk, p, SUBSEP); if (p[1] + 0 >= keep) print p[1], p[2], p[3], bu[bk] + 0, bd[bk] + 0, bp[bk] + 0, bf[bk] + 0 > (D "/flow.b10.new") }
+		}' $D/flow.map $D/flow.last $D/dnsmap.tsv $D/flow.tot $D/flow.b10 $D/flow.ct
+	if [ $? = 0 ]; then mv $D/flow.last.new $D/flow.last; mv $D/flow.tot.new $D/flow.tot; mv $D/flow.b10.new $D/flow.b10; else rm -f $D/flow.last.new $D/flow.tot.new $D/flow.b10.new; fi
+	rm -f $D/flow.map $D/flow.ct
+	# the totals file is bounded: keep the biggest sites (sort here has no -k, so the sort key goes in front)
+	n=$(wc -l < $D/flow.tot)
+	if [ "$n" -gt $FLOW_CAP ]; then
+		awk '{print $3 + $4, $0}' $D/flow.tot | sort -rn | head -n $((FLOW_CAP - 1000)) | cut -d' ' -f2- > $D/flow.tot.new && mv $D/flow.tot.new $D/flow.tot
+	fi
+	rm -rf $D/flow.lock
+}
+
+# today so far, per device: what flash remembers from before the last reboot (daily.base) + the 5-minute buckets since boot
+daily_today() {
+	today=$(date +%Y%m%d); t0=$(tr_range_from today); base=$D/daily.base
+	if [ "$(head -n 1 $base 2>/dev/null)" != "#$today" ]; then
+		{ echo "#$today"; [ -f $DAILY ] && awk -F"$TAB" -v d="$today" '$1 == d { print $2 "\t" $3 "\t" $4 }' $DAILY; } > $base
+	fi
+	awk -v t0="$t0" -v T="$TAB" '
+		FILENAME == ARGV[1] { if ($0 !~ /^#/) { bu[$1] += $2; bd[$1] += $3; all[$1] = 1 } next }
+		{ if ($1 + 0 >= t0) { bu[$2] += $3; bd[$2] += $4; all[$2] = 1 } }
+		END { for (m in all) print m T (bu[m] + 0) T (bd[m] + 0) }' $base $D/tr.bk
+}
+# Devices on the block list lose their internet access: everything they send that is not meant for the router itself
+# (or for the LAN broadcast / multicast addresses) is dropped in the earliest hook, before the proxy redirect and before the
+# counters. They can still reach this router (web page, DNS, DHCP), so the block can always be lifted from the page.
+block_apply() {
+	nft delete table inet netmon_block 2>/dev/null
+	macs=$(awk 'NF { printf "%s%s", (n++ ? ", " : ""), $1 }' $BLOCK 2>/dev/null)
+	[ -n "$macs" ] || return 0
+	rip=$(routerip); [ -n "$rip" ] || return 1
+	nft -f - <<EOF
+table inet netmon_block {
+	chain pre {
+		type filter hook prerouting priority -310; policy accept;
+		iifname "br-lan" ether saddr { $macs } ip daddr != { $rip, 255.255.255.255, ${rip%.*}.255, 224.0.0.0/4 } counter drop
+	}
+}
+EOF
+}
+valid_mac() { echo "$1" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; }
+# replace (or remove, when the value is empty) one "mac <TAB> value" line of a small flash file, without rewriting it if nothing changes
+kv_set() {      # file mac value
+	f="$1"; tmp="$1.new"
+	{ [ -f "$f" ] && grep -v "^$2$TAB" "$f"; [ -n "$3" ] && printf '%s\t%s\n' "$2" "$3"; } > "$tmp"
+	if [ -f "$f" ] && cmp -s "$tmp" "$f"; then rm -f "$tmp"; else mv "$tmp" "$f"; fi
+}
+
 case "$1" in
 collect)
 	enabled || exit 0
@@ -19,16 +256,32 @@ collect)
 	now=$(date +%s)
 	rip=$(routerip)
 	# line (log-queries=extra): "Oct 23 23:40:01 dnsmasq[1]: 76 192.168.10.5/50598 query[A] www.example.com from 192.168.10.5"
-	awk -v now="$now" -v rip="$rip" '
+	awk -v now="$now" -v rip="$rip" -v D="$D" '
 		{
-			for (i = 1; i <= NF; i++) if ($i == "query[A]") break
-			if (i > NF || $(i + 2) != "from") next
-			dom = tolower($(i + 1)); ip = $(i + 3)
-			if (ip == rip || ip == "127.0.0.1" || ip == "::1") next
-			if (dom ~ /\.(lan|arpa|local|localdomain)$/ || dom !~ /\./) next
-			k = ip SUBSEP dom
-			if (!(k in seen)) { seen[k] = 1; print now "\t" ip "\t" dom }
+			for (i = 1; i <= NF; i++) if ($i == "query[A]" || $i == "reply" || $i == "cached") break
+			if (i > NF) next
+			if ($i == "query[A]") {
+				if ($(i + 2) != "from") next
+				dom = tolower($(i + 1)); ip = $(i + 3)
+				qn[$(i - 2)] = dom                      # query id -> the name the device really asked for
+				if (ip == rip || ip == "127.0.0.1" || ip == "::1") next
+				if (dom ~ /\.(lan|arpa|local|localdomain)$/ || dom !~ /\./) next
+				k = ip SUBSEP dom
+				if (!(k in seen)) { seen[k] = 1; print now "\t" ip "\t" dom }
+				next
+			}
+			# an IPv4 answer: remember "this device resolved <domain> to <ip>" so per-site traffic can name its flows
+			if ($(i + 2) == "is" && $(i + 3) ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+				cl = $(i - 1); sub(/\/.*/, "", cl)
+				if (cl == rip || cl == "127.0.0.1") next
+				nm = (($(i - 2)) in qn) ? qn[$(i - 2)] : tolower($(i + 1))
+				if (nm ~ /\.(lan|arpa|local|localdomain)$/ || nm !~ /\./) next
+				k2 = cl SUBSEP $(i + 3)
+				if (!(k2 in ms)) { ms[k2] = 1; print cl "\t" $(i + 3) "\t" nm "\t" now >> (D "/dnsmap.tsv") }
+			}
 		}' $D/raw.tmp >> $EV
+	# the name map is bounded: keep the newest lines only
+	[ -f $D/dnsmap.tsv ] && [ "$(wc -l < $D/dnsmap.tsv)" -gt 20000 ] && { tail -n 14000 $D/dnsmap.tsv > $D/dnsmap.new && mv $D/dnsmap.new $D/dnsmap.tsv; }
 	rm -f $D/raw.tmp
 	n=$(wc -l < $EV)
 	[ "$n" -gt "$MAX" ] && { tail -n $MAX $EV > $EV.new && mv $EV.new $EV; }
@@ -68,6 +321,13 @@ stats)
 	echo "oldest=$( [ -s $EV ] && head -n 1 $EV | cut -f1 || echo 0 )"
 	echo "now=$(date +%s)"
 	echo "logging=$( [ "$(uci -q get dhcp.@dnsmasq[0].logqueries)" = 1 ] && echo 1 || echo 0 )"
+	echo "traffic=$( [ "$(uci -q get netmon.main.traffic)" = 1 ] && echo 1 || echo 0 )"
+	echo "tr_devices=$( [ -f $D/tr.tot ] && wc -l < $D/tr.tot || echo 0 )"
+	echo "tr_since=$( cat $D/tr.since 2>/dev/null || echo 0 )"
+	echo "flow_sites=$( [ -f $D/flow.tot ] && wc -l < $D/flow.tot || echo 0 )"
+	echo "dns_names=$( [ -f $D/dnsmap.tsv ] && wc -l < $D/dnsmap.tsv || echo 0 )"
+	# everything kept for this page lives in /tmp (RAM): the record files plus the raw DNS log, counted in whole blocks like the filesystem does
+	echo "mem_kb=$(du -sk $D $RAW 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')"
 	;;
 on)
 	uci -q get netmon.main >/dev/null || { touch /etc/config/netmon; uci set netmon.main=netmon; }
@@ -95,7 +355,164 @@ clear)
 	[ -f $RAW ] && : > $RAW
 	echo cleared
 	;;
+tr-update)
+	tr_update
+	;;
+traffic)
+	# netmon traffic [today|all|<seconds>]  ->  now= / since= / enabled= lines, then one TAB-separated line per device:
+	# mac ip name online up_total down_total up_range down_range   (bytes; NOT sorted: BusyBox sort has no -t/-k, the page sorts)
+	if ! tr_on; then echo "now=$(date +%s)"; echo "since=0"; echo "enabled=0"; exit 0; fi
+	tr_update
+	from=$(tr_range_from "${2:-today}")
+	tr_devinfo_cached > $D/tr.dev
+	echo "now=$(date +%s)"; echo "since=$(cat $D/tr.since 2>/dev/null || echo 0)"; echo "enabled=1"
+	AL=$ALIAS; [ -f "$AL" ] || AL=/dev/null
+	SN=$SEEN; seeded=1; [ -f "$SN" ] || { SN=/dev/null; seeded=0; }
+	now=$(date +%s); today0=$(tr_range_from today)
+	# columns: mac ip name online upTotal downTotal upRange downRange upToday downToday firstSeen
+	awk -v from="$from" -v T="$TAB" -v now="$now" -v today0="$today0" -v seeded="$seeded" -v seenf="$SEEN" '
+		FILENAME == ARGV[1] { dm[$1] = 1; dip[$1] = $2; dname[$1] = $3; don[$1] = $4; next }
+		FILENAME == ARGV[2] { tu[$1] = $2; td[$1] = $3; all[$1] = 1; next }
+		FILENAME == ARGV[3] { if ($1 + 0 >= from) { ru[$2] += $3; rd[$2] += $4 } if ($1 + 0 >= today0) { yu[$2] += $3; yd[$2] += $4 } all[$2] = 1; next }
+		FILENAME == ARGV[4] { i = index($0, T); if (i > 1) al[substr($0, 1, i - 1)] = substr($0, i + 1); next }
+		FILENAME == ARGV[5] { sn[$1] = $2; next }
+		END {
+			for (m in dm) all[m] = 1
+			for (m in all) {
+				ip = (m in dip) ? dip[m] : ((m ~ /^ip:/) ? substr(m, 4) : "-")
+				name = (m in al) ? al[m] : ((m in dname) ? dname[m] : "-")
+				if (from == 0) { a = tu[m] + 0; z = td[m] + 0 } else { a = ru[m] + 0; z = rd[m] + 0 }
+				# a device seen for the first time now is remembered; the ones that were already there when this was switched on get 0
+				if (m !~ /^ip:/ && !(m in sn)) { sn[m] = seeded ? now : 0; print m T sn[m] >> seenf }
+				print m T ip T name T ((m in don) ? don[m] : 0) T (tu[m] + 0) T (td[m] + 0) T a T z T (yu[m] + 0) T (yd[m] + 0) T ((m in sn) ? sn[m] : 0)
+			}
+		}' $D/tr.dev $D/tr.tot $D/tr.bk "$AL" "$SN"
+	rm -f $D/tr.dev
+	;;
+tr-series)
+	# netmon tr-series <mac|all> <today|seconds>  ->  "bucket_epoch up down" for every 5-minute bucket, zero filled
+	tr_on || exit 0
+	tr_update
+	mac="${2:-all}"; from=$(tr_range_from "${3:-86400}"); now=$(date +%s)
+	[ "$from" -lt $((now - KEEP_H * 3600)) ] && from=$((now - KEEP_H * 3600))
+	awk -v mac="$mac" -v from="$from" -v now="$now" -v B="$BUCKET" '
+		$1 + 0 >= from - B && (mac == "all" || $2 == mac) { u[$1] += $3; d[$1] += $4 }
+		END { s = int(from / B) * B; e = int(now / B) * B; for (t = s; t <= e; t += B) print t, u[t] + 0, d[t] + 0 }' $D/tr.bk
+	;;
+flow-sample)
+	flow_sample
+	;;
+flow-run)
+	# started by cron once a minute: two samples, 30 s apart (a flow that lives less than a minute is still seen)
+	flow_sample; sleep 30; flow_sample
+	;;
+sites)
+	# netmon sites <mac> <3600|all>  ->  per site, biggest first:  domain up down flows last proxied_bytes ips
+	# (3600 = the last hour from 10-minute buckets; all = everything since the statistics started)
+	tr_on || exit 0
+	mac="$2"; range="${3:-all}"; now=$(date +%s)
+	if [ "$range" = all ]; then
+		awk -v m="$mac" '$1 == m { print $3 + $4, $2, $3, $4, $5, $6, $7, $8 }' $D/flow.tot | sort -rn | head -n 300 | cut -d' ' -f2-
+	else
+		from=$(( now - range ))
+		awk -v m="$mac" -v from="$from" '
+			FILENAME == ARGV[1] { if ($1 == m) { lt[$2] = $6; ipl[$2] = $8 } next }
+			$2 == m && $1 + 0 >= from { u[$3] += $4; d[$3] += $5; p[$3] += $6; f[$3] += $7 }
+			END { for (x in u) print u[x] + d[x], x, u[x], d[x], f[x] + 0, lt[x] + 0, p[x] + 0, (ipl[x] == "" ? "-" : ipl[x]) }' $D/flow.tot $D/flow.b10 | sort -rn | head -n 300 | cut -d' ' -f2-
+	fi
+	;;
+tr-on)
+	tr_need_cfg; uci set netmon.main.traffic=1; uci commit netmon
+	tr_installed || rm -f $D/tr.last          # a fresh table counts from zero; an existing one keeps its counters, so keep our baseline
+	rm -f $D/flow.last; tr_install; tr_cron
+	echo "traffic on"
+	;;
+tr-off)
+	uci -q get netmon.main >/dev/null && { uci set netmon.main.traffic=0; uci commit netmon; }
+	nft delete table inet netmon_tr 2>/dev/null; rm -f $D/tr.last $D/flow.last
+	echo "traffic off"
+	;;
+tr-clear)
+	tr_lock
+	: > $D/tr.tot; : > $D/tr.bk; : > $D/flow.tot; : > $D/flow.b10; rm -f $D/tr.since $D/flow.px       # tr.last stays: later deltas continue from the current counters
+	tr_unlock
+	echo cleared
+	;;
+alias-set)
+	# netmon alias-set <mac> [name] : give a device a name of your own (empty name = back to the DHCP name)
+	mac=$(echo "$2" | tr A-F a-f); valid_mac "$mac" || { echo "bad mac"; exit 1; }
+	name=$(printf '%s' "$3" | tr -d '\t\r\n')
+	[ ${#name} -le 90 ] || { echo "name too long"; exit 1; }
+	kv_set $ALIAS "$mac" "$name"; echo ok
+	;;
+alias-list)
+	[ -f $ALIAS ] && cat $ALIAS
+	;;
+block-set)
+	# netmon block-set <mac> 1|0 : cut a device off from the internet (1) or let it back on (0)
+	mac=$(echo "$2" | tr A-F a-f); valid_mac "$mac" || { echo "bad mac"; exit 1; }
+	case "$3" in 1|0) ;; *) echo "bad value"; exit 1 ;; esac
+	{ [ -f $BLOCK ] && grep -vx "$mac" $BLOCK; [ "$3" = 1 ] && echo "$mac"; } > $BLOCK.new
+	if [ -f $BLOCK ] && cmp -s $BLOCK.new $BLOCK; then rm -f $BLOCK.new; else mv $BLOCK.new $BLOCK; fi
+	block_apply && echo ok || echo "could not load the rule"
+	;;
+block-list)
+	[ -f $BLOCK ] && cat $BLOCK
+	;;
+block-apply)
+	# run at boot (init script): put the saved block list back in place
+	block_apply
+	;;
+quota-set)
+	# netmon quota-set <mac> <bytes per day> : 0 or empty removes the limit
+	mac=$(echo "$2" | tr A-F a-f); valid_mac "$mac" || { echo "bad mac"; exit 1; }
+	case "$3" in ""|0) v="" ;; *[!0-9]*) echo "bad value"; exit 1 ;; *) v="$3" ;; esac
+	kv_set $QUOTA "$mac" "$v"; echo ok
+	;;
+quota-list)
+	[ -f $QUOTA ] && cat $QUOTA
+	;;
+daily-save)
+	# cron: remember today's totals in flash (the last 35 days are kept), so they survive a reboot
+	tr_on || exit 0
+	today=$(date +%Y%m%d); cutoff=$(date -d "@$(( $(date +%s) - 35 * 86400 ))" +%Y%m%d)
+	daily_today > $D/daily.today
+	{ [ -f $DAILY ] && awk -F"$TAB" -v d="$today" -v c="$cutoff" '$1 != d && $1 >= c' $DAILY; awk -v d="$today" -v T="$TAB" '{ print d T $1 T $2 T $3 }' $D/daily.today; } > $DAILY.new
+	if [ ! -s $DAILY.new ] || { [ -f $DAILY ] && cmp -s $DAILY.new $DAILY; }; then rm -f $DAILY.new; else mv $DAILY.new $DAILY; fi
+	rm -f $D/daily.today
+	;;
+daily)
+	# netmon daily [mac|all] -> "YYYYMMDD up down", one line per day, oldest first (the current day is live)
+	tr_on || exit 0
+	today=$(date +%Y%m%d); daily_today > $D/daily.today
+	{ [ -f $DAILY ] && awk -F"$TAB" -v d="$today" '$1 != d' $DAILY; awk -v d="$today" -v T="$TAB" '{ print d T $1 T $2 T $3 }' $D/daily.today; } | awk -F"$TAB" -v m="${2:-all}" 'm == "all" || $2 == m { u[$1] += $3; d[$1] += $4 } END { for (k in u) print k, u[k] + 0, d[k] + 0 }' | sort | tail -n 31
+	rm -f $D/daily.today
+	;;
+rdns)
+	# netmon rdns <ip> [ip ...] -> "ip <TAB> host" for the ones that have a reverse name (cached in RAM, lookups run in parallel, 7 s at most)
+	shift; C=$D/rdns.tsv; touch $C; todo=""; n=0
+	for ip in "$@"; do
+		echo "$ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || continue
+		grep -q "^$ip$TAB" $C && continue
+		[ $n -lt 12 ] || break; n=$((n + 1)); todo="$todo $ip"
+	done
+	pids=""
+	for ip in $todo; do nslookup $ip 127.0.0.1 > $D/rd.$ip 2>&1 </dev/null & pids="$pids $!"; done
+	if [ -n "$pids" ]; then
+		( sleep 7; kill $pids 2>/dev/null ) >/dev/null 2>&1 & kp=$!
+		wait $pids 2>/dev/null; kill $kp 2>/dev/null
+		for ip in $todo; do
+			h=$(sed -n 's/.*name = //p' $D/rd.$ip 2>/dev/null | head -n 1 | sed 's/\.$//'); rm -f $D/rd.$ip
+			printf '%s\t%s\n' "$ip" "${h:--}" >> $C
+		done
+	fi
+	for ip in "$@"; do awk -F"$TAB" -v ip="$ip" '$1 == ip && $2 != "-" { print; exit }' $C; done
+	;;
 *)
 	echo "usage: netmon on | off | clear | collect | stats | devices | recent [n] [ip] | top [ip] [secs] [limit]"
+	echo "       netmon tr-on | tr-off | tr-clear | tr-update | traffic [today|all|secs] | tr-series <mac|all> <today|secs>"
+	echo "       netmon flow-run | flow-sample | sites <mac> <3600|all> | rdns <ip>..."
+	echo "       netmon block-set <mac> 1|0 | block-list | block-apply"
+	echo "       netmon alias-set <mac> [name] | alias-list | quota-set <mac> <bytes> | quota-list | daily [mac|all] | daily-save"
 	;;
 esac

@@ -1,0 +1,6 @@
+#!/bin/sh /etc/rc.common
+# put the "no internet" device list of the netmon page back after a reboot
+START=20
+start() {
+	/usr/bin/netmon block-apply
+}

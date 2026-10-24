@@ -7,86 +7,105 @@
 var BIN = '/usr/bin/xray-sub';
 
 var CSS = [
-	'.xr{width:100%;max-width:1100px;min-width:0;margin:0 auto;padding-top:22px;--xr-a:#4c6ef5;--xr-ok:#2bb673;--xr-warn:#f59f00;--xr-bad:#e8590c;--xr-line:rgba(127,127,127,.28);--xr-soft:rgba(127,127,127,.09)}',
+	'.xr{width:100%;max-width:1100px;min-width:0;margin:0 auto;padding-top:40px;--xr-a:#5b7cff;--xr-a2:#8b5cf6;--xr-ok:#22c55e;--xr-bad:#ef4444;--xr-line:rgba(127,127,127,.28);--xr-soft:rgba(127,127,127,.09)}',
 	'.xr *{box-sizing:border-box}',
-	'.xr-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 14px}',
-	'.xr-title{font-size:22px;font-weight:700;margin:8px 0 2px}',
-	'.xr-sub{opacity:.7;font-size:13px;margin:0 0 16px}',
-	'.xr-card{min-width:0;border:1px solid var(--xr-line);border-radius:16px;padding:16px;margin:0 0 16px;background:var(--xr-soft)}',
-	'.xr-h{margin:0 0 12px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}',
-	'.xr-chips{display:flex;flex-wrap:wrap;gap:8px}',
-	'.xr-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--xr-line);font-size:13px;white-space:nowrap;background:rgba(127,127,127,.06)}',
-	'.xr-dot{width:9px;height:9px;border-radius:50%;background:#999;display:inline-block}',
-	'.xr-chip.ok .xr-dot{background:var(--xr-ok);box-shadow:0 0 0 3px rgba(43,182,115,.22)}',
-	'.xr-chip.bad .xr-dot{background:var(--xr-bad)}',
-	'.xr-now{display:flex;align-items:center;gap:12px;margin:0 0 12px}',
-	'.xr-now .big{font-size:22px;line-height:1.25;font-weight:700;word-break:break-all}',
-	'.xr-now .lab{font-size:12px;opacity:.65}',
-	'.xr-seg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 12px}',
-	'.xr-seg button{height:auto;min-height:56px;border-radius:14px;border:2px solid var(--xr-line);background:transparent;color:inherit;font-size:16px;cursor:pointer;padding:8px 10px;line-height:1.3}',
-	'.xr-seg button small{display:block;font-size:12px;opacity:.7;font-weight:400}',
-	'.xr-seg button.on{background:var(--xr-a);border-color:var(--xr-a);color:#fff;font-weight:700}',
-	'.xr-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}',
-	'.xr-field{width:100%;min-height:44px;font-size:16px;padding:8px 12px;border-radius:12px;border:1px solid var(--xr-line);background:rgba(255,255,255,.04);color:inherit}',
-	'.xr-btn{min-height:44px;padding:8px 18px;border-radius:12px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:15px;cursor:pointer}',
-	'.xr-btn.pri{background:var(--xr-a);border-color:var(--xr-a);color:#fff;font-weight:600}',
+	'.xr-title{font-size:24px;font-weight:800;letter-spacing:.5px;margin:0 0 2px}',
+	'.xr-sub{opacity:.7;font-size:13px;margin:0 0 12px}',
+	'.xr-card{min-width:0;border:1px solid var(--xr-line);border-radius:18px;padding:12px 14px;margin:0 0 10px;background:var(--xr-soft)}',
+	/* hero: current node, state chips, the two quick actions */
+	'.xr-hero{background:linear-gradient(135deg,#5b7cff 0%,#7c5cff 55%,#a35cf0 100%);color:#fff;border:0;box-shadow:0 10px 30px rgba(91,124,255,.28);position:relative;overflow:hidden;border-radius:22px;padding:16px;margin-bottom:12px}',
+	'.xr-hero:before{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.10)}',
+	'.xr-hero>*{position:relative}',
+	'.xr-now{margin:0 0 10px}',
+	'.xr-now .lab{font-size:12px;opacity:.85}',
+	'.xr-now .big{font-size:24px;line-height:1.2;font-weight:800;word-break:break-all}',
+	'.xr-chips{display:flex;flex-wrap:wrap;gap:6px}',
+	'.xr-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;white-space:nowrap;background:rgba(255,255,255,.18);color:#fff}',
+	'.xr-dot{width:8px;height:8px;border-radius:50%;background:#cbd5e1;display:inline-block;flex:0 0 auto}',
+	'.xr-chip.ok .xr-dot{background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.3)}',
+	'.xr-chip.bad .xr-dot{background:#fca5a5;box-shadow:0 0 0 3px rgba(252,165,165,.3)}',
+	'.xr-two{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}',
+	'.xr-two .xr-btn{min-height:38px;padding:4px 10px;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.38);color:#fff;font-size:14.5px;white-space:nowrap}',
+	'.xr-two .xr-btn:hover{background:rgba(255,255,255,.26)}',
+	/* collapsible sections */
+	'details.xr-det>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;min-height:34px;font-size:15.5px;font-weight:700}',
+	'details.xr-det>summary::-webkit-details-marker{display:none}',
+	'details.xr-det>summary::after{content:"";flex:0 0 auto;width:8px;height:8px;margin:0 4px 3px 2px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);opacity:.55;transition:transform .15s}',
+	'details.xr-det[open]>summary::after{transform:rotate(-135deg);margin-bottom:-2px}',
+	'details.xr-det[open]>summary{margin-bottom:10px}',
+	'.xr-hint{margin-left:auto;min-width:0;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:400;opacity:.7}',
+	/* controls */
+	'.xr-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
+	'.xr-field{width:100%;min-height:40px;font-size:15px;padding:6px 12px;border-radius:12px;border:1px solid var(--xr-line);background:rgba(255,255,255,.04);color:inherit}',
+	'.xr-btn{min-height:40px;padding:6px 16px;border-radius:12px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:14.5px;cursor:pointer;transition:background .15s,transform .1s}',
+	'.xr-btn:active{transform:scale(.98)}',
+	'.xr-btn.pri{background:linear-gradient(135deg,var(--xr-a),var(--xr-a2));border-color:transparent;color:#fff;font-weight:600}',
 	'.xr-btn[disabled]{opacity:.45;cursor:not-allowed}',
 	'.xr-inline{flex-wrap:nowrap}.xr-inline .xr-field{flex:1 1 auto;width:auto;min-width:0}.xr-inline .xr-btn{flex:0 0 auto;white-space:nowrap}',
-	'.xr-tip{font-size:12.5px;opacity:.7;margin:8px 0 0}',
-	'.xr-tags{max-width:100%;display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch}',
-	'.xr-tag{flex:0 0 auto;min-height:36px;padding:4px 14px;border-radius:999px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:14px;cursor:pointer}',
-	'.xr-tag.on{background:var(--xr-a);border-color:var(--xr-a);color:#fff}',
-	'.xr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}',
-	'.xr-node{position:relative;border:2px solid var(--xr-line);border-radius:14px;padding:12px 12px 10px;cursor:pointer;background:rgba(127,127,127,.04);transition:border-color .15s,transform .1s}',
-	'.xr-node:hover{border-color:var(--xr-a)}',
-	'.xr-node.sel{border-color:var(--xr-a);background:rgba(76,110,245,.12)}',
-	'.xr-node.cur::after{content:"当前";position:absolute;top:8px;right:8px;background:var(--xr-ok);color:#fff;font-size:11px;padding:1px 8px;border-radius:999px}',
-	'.xr-node .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;padding-right:44px}',
-	'.xr-node .f{font-size:22px;line-height:1}',
-	'.xr-node .p{font-size:12px;opacity:.65;margin:2px 0 8px}',
-	'.xr-badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:6px;border:1px solid var(--xr-line);margin-right:6px}',
-	'.xr-meter{height:7px;border-radius:99px;background:rgba(127,127,127,.2);overflow:hidden;margin:8px 0 4px}',
-	'.xr-meter i{display:block;height:100%;border-radius:99px;background:var(--xr-ok)}',
-	'.xr-meter i.mid{background:var(--xr-warn)}.xr-meter i.low{background:var(--xr-bad)}',
-	'.xr-spd{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;opacity:.9}',
-	'.xr-mini{min-height:30px;padding:2px 14px;border-radius:9px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:12.5px;cursor:pointer}',
-	'.xr-mini[disabled]{opacity:.45;cursor:not-allowed}',
-	'.xr-prog{display:none;margin-top:14px;padding:12px 14px;border:1px solid var(--xr-line);border-radius:12px;background:rgba(127,127,127,.06)}',
-	'.xr-prog.show{display:block}',
-	'.xr-pbar{height:10px;border-radius:99px;background:rgba(127,127,127,.22);overflow:hidden}',
-	'.xr-pbar i{display:block;height:100%;border-radius:99px;background:var(--xr-a);transition:width .5s}',
-	'.xr-prog.done .xr-pbar i{background:var(--xr-ok)}',
+	'.xr-seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;border-radius:14px;border:1px solid var(--xr-line);background:rgba(127,127,127,.08);margin:0 0 8px}',
+	'.xr-seg button{min-height:38px;border-radius:10px;border:0;background:transparent;color:inherit;font-size:14.5px;cursor:pointer;padding:4px 8px}',
+	'.xr-seg button.on{background:linear-gradient(135deg,var(--xr-a),var(--xr-a2));color:#fff;font-weight:700;box-shadow:0 4px 12px rgba(91,124,255,.35)}',
+	'.xr-tip{font-size:12.5px;opacity:.7;margin:8px 0 0;line-height:1.5}',
+	'.xr-lab{font-size:13px;font-weight:600;margin:10px 0 6px;opacity:.85}',
 	'.xr-ptxt{font-size:13.5px;margin-top:8px;word-break:break-all}',
-	'.xr-devl{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px}',
-	'.xr-dev{display:flex;align-items:center;gap:10px;min-height:54px;padding:8px 12px;border:1px solid var(--xr-line);border-radius:12px;cursor:pointer;background:rgba(127,127,127,.04)}',
-	'.xr-dev.dis{opacity:.65;cursor:default}',
-	'.xr-dev input{width:20px;height:20px;flex:0 0 auto}',
-	'.xr-dev .xr-dot.ok{background:var(--xr-ok);box-shadow:0 0 0 3px rgba(43,182,115,.22)}',
-	'.xr-dn{flex:1 1 auto;min-width:0;font-weight:600;font-size:14.5px;word-break:break-all}',
-	'.xr-dn small{display:block;font-weight:400;font-size:12px;opacity:.65;margin-top:1px}',
-	'.xr-st{flex:0 0 auto;font-size:12px;opacity:.7}',
-	'.xr-pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}',
-	'.xr-pager:empty{display:none}',
-	'.xr-pg{min-width:38px;min-height:36px;padding:2px 10px;border-radius:10px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:14px;cursor:pointer}',
-	'.xr-pg.on{background:var(--xr-a);border-color:var(--xr-a);color:#fff;font-weight:700}',
-	'.xr-pg[disabled]{opacity:.35;cursor:not-allowed}',
-	'.xr-pgdot{opacity:.5;padding:0 2px}',
-	'.xr-psize{min-height:36px;margin-left:auto;padding:2px 8px;border-radius:10px;border:1px solid var(--xr-line);background:rgba(255,255,255,.04);color:inherit;font-size:14px}',
-	'.xr-pinfo{font-size:12.5px;opacity:.65}',
-	'.xr-bar{position:sticky;bottom:10px;z-index:20;display:none;gap:10px;align-items:center;justify-content:space-between;margin-top:14px;padding:12px 14px;border-radius:14px;background:var(--xr-a);color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.28)}',
-	'.xr-bar.show{display:flex}',
-	'.xr-bar b{word-break:break-all}',
-	'.xr-bar button{min-height:42px;border-radius:10px;border:0;padding:6px 18px;font-weight:700;cursor:pointer;background:#fff;color:#3b5bdb;white-space:nowrap}',
-	'details.xr-det summary{cursor:pointer;font-weight:600;font-size:16px;list-style:none;display:flex;align-items:center;gap:8px;min-height:32px}',
-	'details.xr-det summary::-webkit-details-marker{display:none}',
-	'details.xr-det[open] summary{margin-bottom:12px}',
+	/* dropdown with ticks */
+	'.xr-dd{min-width:0}',
+	'.xr-ddbtn{width:100%;min-height:42px;display:flex;align-items:center;gap:8px;padding:4px 12px;border-radius:12px;border:1px solid var(--xr-line);background:rgba(255,255,255,.04);color:inherit;font-size:14.5px;cursor:pointer;text-align:left}',
+	'.xr-ddbtn .txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+	'.xr-ddbtn .caret{flex:0 0 auto;opacity:.55;transition:transform .15s}',
+	'.xr-dd.open .xr-ddbtn{border-color:var(--xr-a)}',
+	'.xr-dd.open .xr-ddbtn .caret{transform:rotate(180deg)}',
+	'.xr-ddp{display:none;margin-top:6px;border:1px solid var(--xr-line);border-radius:12px;background:rgba(127,127,127,.06);overflow:hidden}',
+	'.xr-dd.open .xr-ddp{display:block}',
+	'.xr-ddh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--xr-line)}',
+	'.xr-ddh .xr-field{min-height:36px;font-size:14px;padding:4px 10px;flex:1 1 120px;width:auto;min-width:0}',
+	'.xr-ddh input.xr-field{background:rgba(127,127,127,.1)!important;border:1px solid var(--xr-line)!important;border-radius:10px!important}',
+	'.xr-ddh .xr-btn{min-height:32px;padding:2px 12px;font-size:13px}',
+	'.xr-ddc{margin-left:auto;font-size:12px;opacity:.65}',
+	'.xr-ddl{max-height:min(320px,55vh);overflow-y:auto;-webkit-overflow-scrolling:touch}',
+	'.xr-opt{display:flex;align-items:center;gap:8px;min-height:38px;padding:3px 10px;border-bottom:1px solid var(--xr-line);cursor:pointer;min-width:0}',
+	'.xr-opt:last-child{border-bottom:0}',
+	'.xr-opt:hover{background:rgba(91,124,255,.08)}',
+	'.xr-opt.cur{background:rgba(91,124,255,.12)}',
+	'.xr-opt input{width:18px;height:18px;flex:0 0 auto;margin:0!important;align-self:center;position:static!important;top:0!important}',
+	'.xr-grp{padding:5px 10px;font-size:12px;font-weight:700;opacity:.8;background:rgba(127,127,127,.12);border-bottom:1px solid var(--xr-line)}',
+	'.xr-grp small{font-weight:400;opacity:.7;margin-left:4px}',
+	'.xr-opt .f{flex:0 0 auto;font-size:17px;line-height:1}',
+	'.xr-opt .n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}',
+	'.xr-opt .n small{font-weight:400;font-size:11.5px;opacity:.6;margin-left:6px}',
+	'.xr-opt.two{min-height:52px;padding:6px 12px;gap:10px}',
+	'.xr-opt.two .n{font-size:15px}',
+	'.xr-opt.two .n small{display:block;margin:2px 0 0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+	'.xr-opt.two .f{font-size:22px}',
+	'.xr-opt .t{flex:0 0 auto;font-size:11px;padding:0 7px;line-height:18px;border-radius:99px;border:1px solid var(--xr-line);opacity:.85;white-space:nowrap}',
+	'.xr-opt .t.on{background:var(--xr-ok);border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .s{flex:0 0 auto;font-size:11.5px;opacity:.65}',
+	'.xr-opt .xr-dot{background:#94a3b8}.xr-opt .xr-dot.ok{background:var(--xr-ok)}',
+	'.xr-opt .d{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}',
+	'.xr-opt .d small{font-weight:400;font-size:11.5px;opacity:.6;margin-left:6px}',
+	'.xr-form{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}',
+	'.xr-f{display:block;min-width:0}',
+	'.xr-f.full{grid-column:1/3}',
+	'.xr-fl{display:block;font-size:12px;opacity:.7;margin:0 0 3px}',
+	'.xr-ta{min-height:92px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;line-height:1.5}',
+	'.xr-two3{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}',
+	'.xr-status{margin:10px 0 0;padding:8px 12px;border-radius:12px;border:1px solid var(--xr-line);background:rgba(127,127,127,.06);font-size:13px;line-height:1.6}',
+	'.xr-status b{font-weight:700}',
+	'.xr-empty{padding:16px 8px;text-align:center;opacity:.65;font-size:13.5px}',
+	'.xr-sel{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}',
+	'.xr-sel:empty{display:none}',
+	'.xr-sc{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 4px 2px 10px;border-radius:99px;border:1px solid var(--xr-line);background:rgba(91,124,255,.1);font-size:13px}',
+	'.xr-sc span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+	'.xr-sc button{flex:0 0 auto;width:22px;height:22px;border:0;border-radius:50%;background:rgba(127,127,127,.2);color:inherit;font-size:14px;line-height:1;cursor:pointer;padding:0}',
+	'.xr-use{display:none;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding:8px 8px 8px 12px;border-radius:12px;background:linear-gradient(135deg,var(--xr-a),var(--xr-a2));color:#fff}',
+	'.xr-use.show{display:flex}',
+	'.xr-use span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}',
+	'.xr-use button{flex:0 0 auto;min-height:34px;border-radius:9px;border:0;padding:2px 14px;font-weight:700;cursor:pointer;background:#fff;color:#3b5bdb}',
 	'@media (max-width:640px){',
-	'.xr-grid{grid-template-columns:1fr}',
-	'.xr-now .big{font-size:19px}',
-	'.xr-card{padding:14px;border-radius:14px}',
-	'.xr-btn{flex:1 1 auto}',
-	'.xr-row:not(.xr-inline)>.xr-btn{width:100%}',
-	'.xr-bar{flex-direction:column;align-items:stretch;text-align:center}',
+	'.xr-now .big{font-size:20px}',
+	'.xr-hero{padding:14px}',
+	'.xr-card{padding:10px 12px;border-radius:14px}',
+	'.xr-row:not(.xr-inline)>.xr-btn{flex:1 1 auto}',
 	'}'
 ].join('\n');
 
@@ -144,22 +163,8 @@ function parseNodes(txt) {
 	return txt.split('\n').filter(Boolean).map(function(l) {
 		var p = l.split('\t'), n = { idx: p[0], name: p[1] || '', kind: (p[2] || '').replace(/^\//, '') };
 		n.info = parseName(n.name);
-		n.ws = /^ws/.test(n.kind);
 		return n;
 	});
-}
-
-function parseBench(txt) {
-	var lines = txt.split('\n'), res = { running: lines[0] === 'running', speed: {}, done: 0, total: 0, cur: '' };
-	if ((lines[1] || '').indexOf('P ') === 0) {
-		var pp = lines[1].substr(2).split(' ');
-		res.done = parseInt(pp[0], 10) || 0; res.total = parseInt(pp[1], 10) || 0; res.cur = pp.slice(2).join(' ');
-	}
-	lines.slice(1).forEach(function(l) {
-		var m = l.match(/^\s*([\d.]+) Mbps\s+[\d.]+s\s+[\d.]+\/3MB\s+#(\d+) /);
-		if (m) res.speed[m[2]] = parseFloat(m[1]);
-	});
-	return res;
 }
 
 function parseStatus(txt) {
@@ -169,6 +174,8 @@ function parseStatus(txt) {
 	m = txt.match(/clients:\s*(.*)$/m); s.clients = m ? m[1].trim() : '';
 	m = txt.match(/^chain\s*:\s*(.*)$/m); s.chain = m ? m[1].trim() : 'none';
 	s.enabled = /enabled\s*:\s*1/.test(txt);
+	m = txt.match(/node:\s*(.*)\/\d+\s+clients:/); s.node = m ? m[1] : '';
+	m = txt.match(/^proxied\s*:\s*(\d+)\s+(\d+)/m); s.px = m ? +m[1] : 0; s.pall = m ? +m[2] : 0;
 	return s;
 }
 
@@ -181,6 +188,20 @@ function parseDevices(txt) {
 		if (a.online !== b.online) return a.online ? -1 : 1;
 		return parseInt(a.ip.split('.')[3], 10) - parseInt(b.ip.split('.')[3], 10);
 	});
+}
+
+function fmtB(b) {
+	b = b || 0;
+	if (b < 1024) return Math.round(b) + ' B';
+	if (b < 1048576) return (b / 1024).toFixed(0) + ' KB';
+	if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+	return (b / 1073741824).toFixed(2) + ' GB';
+}
+function p2(n) { return (n < 10 ? '0' : '') + n; }
+function fmtTime(ts) {
+	ts = +ts || 0; if (!ts) return '';
+	var d = new Date(ts * 1000), t = p2(d.getHours()) + ':' + p2(d.getMinutes());
+	return d.toDateString() === new Date().toDateString() ? '今天 ' + t : p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + t;
 }
 
 function clientsText(c) {
@@ -220,23 +241,49 @@ function currentNode(nodes, pattern) {
 
 function note(msg, type) { ui.addNotification(null, E('p', {}, msg), type || 'info'); }
 
+/* a button that opens a panel right below it (inline, so it never gets clipped on a phone); clicking outside closes it */
+var DROPS = [];
+document.addEventListener('click', function(ev) {
+	DROPS.forEach(function(d) { if (d.root.classList.contains('open') && !d.root.contains(ev.target)) d.root.classList.remove('open'); });
+});
+function dropdown() {
+	var txt = E('span', { 'class': 'txt' }), panel = E('div', { 'class': 'xr-ddp' });
+	var btn = E('button', { 'type': 'button', 'class': 'xr-ddbtn' }, [ txt, E('span', { 'class': 'caret' }, '▾') ]);
+	var root = E('div', { 'class': 'xr-dd' }, [ btn, panel ]);
+	btn.addEventListener('click', function() { root.classList.toggle('open'); });
+	var d = { root: root, txt: txt, panel: panel, close: function() { root.classList.remove('open'); } };
+	DROPS.push(d);
+	return d;
+}
+
+/* a collapsible section: click the title to open, click again to close */
+function section(title, hintEl, body) {
+	return E('div', { 'class': 'xr-card' }, E('details', { 'class': 'xr-det' }, [
+		E('summary', {}, [ E('span', {}, title), hintEl ]),
+		body
+	]));
+}
+
 return view.extend({
 	handleSave: null,
 	handleSaveApply: null,
 	handleReset: null,
 
 	load: function() {
-		return Promise.all([ sub([ 'get' ]), sub([ 'list' ]), sub([ 'status' ]), sub([ 'bench-state' ]), sub([ 'devices' ]), sub([ 'stats' ]) ]);
+		return Promise.all([ sub([ 'get' ]), sub([ 'list' ]), sub([ 'status' ]), sub([ 'devices' ]), sub([ 'stats' ]), sub([ 'health' ]) ]);
 	},
 
 	render: function(d) {
-		var cfg = kv(d[0]), nodes = parseNodes(d[1]), bench = parseBench(d[3]), st = parseStatus(d[2]);
-		var selected = null, region = '', sortSpeed = false, wantProxy = cfg.enabled === '1';
-		var devs = parseDevices(d[4] || '');
+		var cfg = kv(d[0]), nodes = parseNodes(d[1]), st = parseStatus(d[2]);
+		var wantProxy = cfg.enabled === '1';
+		var health = kv(d[5] || ''), autoSw = cfg.auto_switch === '1';
+		var devs = parseDevices(d[3] || '');
 		var tokens = (cfg.clients || 'all').split(' ').filter(Boolean);
 		var scope = (!tokens.length || tokens[0] === 'all') ? 'all' : 'pick';
 		var sel = {};
 		tokens.forEach(function(t) { if (t !== 'all' && t !== 'none') sel[t.toLowerCase()] = 1; });
+		var hMode = E('span', { 'class': 'xr-hint' }), hNode = E('span', { 'class': 'xr-hint' }), hChain = E('span', { 'class': 'xr-hint' }), hSub = E('span', { 'class': 'xr-hint' });
+		var hSplit = E('span', { 'class': 'xr-hint' }), hBak = E('span', { 'class': 'xr-hint' }, '导出 / 导入设置');
 
 		/* ------------ status ------------ */
 		var chips = E('div', { 'class': 'xr-chips' });
@@ -244,69 +291,105 @@ return view.extend({
 		function drawStatus() {
 			var cur = currentNode(nodes, cfg.node_name);
 			while (nowBox.firstChild) nowBox.removeChild(nowBox.firstChild);
-			nowBox.appendChild(E('div', {}, [
-				E('div', { 'class': 'lab' }, st.enabled ? '当前节点' : '当前节点（代理已关闭）'),
-				E('div', { 'class': 'big' }, cur ? ((cur.info.flag ? cur.info.flag + ' ' : '') + cur.info.title) : '未匹配到节点')
-			]));
+			nowBox.appendChild(E('div', { 'class': 'lab' }, st.enabled ? '当前节点' : '当前节点（代理已关闭）'));
+			nowBox.appendChild(E('div', { 'class': 'big' }, cur ? ((cur.info.flag ? cur.info.flag + ' ' : '') + cur.info.title) : '未匹配到节点'));
 			while (chips.firstChild) chips.removeChild(chips.firstChild);
 			function chip(cls, text) { chips.appendChild(E('span', { 'class': 'xr-chip ' + cls }, [ E('span', { 'class': 'xr-dot' }), text ])); }
-			chip(st.run ? 'ok' : 'bad', st.run ? '代理进程运行中' : '代理进程未运行');
-			chip(st.rules ? 'ok' : '', st.rules ? '转发规则已生效' : '转发规则未启用');
+			chip(st.run ? 'ok' : 'bad', st.run ? '代理运行中' : '代理未运行');
+			chip(st.rules ? 'ok' : '', st.rules ? '转发已生效' : '转发未启用');
 			if (st.mem) chip('', '内存 ' + st.mem);
 			chip('', '节点 ' + (st.nodes || nodes.length));
-			chip('', '代理对象：' + clientsText(cfg.clients));
-			chip(st.chain && st.chain !== 'none' ? 'ok' : '', st.chain && st.chain !== 'none' ? '链式出口：' + st.chain : '链式代理：未使用');
+			chip('', clientsText(cfg.clients));
+			chip(st.chain && st.chain !== 'none' ? 'ok' : '', st.chain && st.chain !== 'none' ? '链式：' + st.chain : '链式：未使用');
+			if (st.pall > 0) chip('', '经代理 ' + fmtB(st.px) + '（' + Math.round(st.px * 100 / st.pall) + '%）');
+			chip(health.last === 'ok' ? 'ok' : (health.last === 'fail' ? 'bad' : ''), health.last === 'ok' ? '线路检测正常' : (health.last === 'fail' ? '线路检测失败 ' + (health.fails || 0) + ' 次' : (health.last === 'wan-down' ? '外网不通' : '线路检测等待中')));
 		}
 
-		/* ------------ mode ------------ */
-		var bProxy = E('button', { 'type': 'button', 'click': function() { wantProxy = true; drawMode(); } }, [ '代理', E('small', {}, '国内直连，国外走代理') ]);
-		var bDirect = E('button', { 'type': 'button', 'click': function() { wantProxy = false; drawMode(); } }, [ '直连', E('small', {}, '关闭代理，全部直连') ]);
-		function drawMode() { bProxy.className = wantProxy ? 'on' : ''; bDirect.className = wantProxy ? '' : 'on'; }
-		drawMode();
-		/* ------------ devices: who goes through the proxy ------------ */
-		var devBox = E('div', { 'class': 'xr-devl' });
-		var devCount = E('span', { 'class': 'xr-tip', 'style': 'margin:0' }, '');
-		var sAll = E('button', { 'type': 'button', 'click': function() { scope = 'all'; drawScope(); } }, [ '全部设备', E('small', {}, '局域网里所有设备') ]);
-		var sPick = E('button', { 'type': 'button', 'click': function() { scope = 'pick'; drawScope(); } }, [ '指定设备', E('small', {}, '只有勾选的设备走代理') ]);
-		function isSel(d) { return !!(sel[d.mac] || sel[d.ip]); }
+		/* ------------ restart / pull subscription ------------ */
+		var restartBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
+			ui.showModal(null, E('p', { 'class': 'spinning' }, '正在重启代理服务，请稍候…'));
+			sub([ 'restart' ]).then(function(out) { return new Promise(function(r) { window.setTimeout(function() { r(out); }, 8000); }); })
+				.then(function(out) {
+					return sub([ 'status' ]).then(function(s) {
+						st = parseStatus(s); drawStatus(); ui.hideModal();
+						var ok = out.indexOf('restarted') >= 0;
+						note(ok ? '代理服务已重启。' : '代理目前是关闭状态，没有重启。', ok ? 'info' : 'danger');
+					});
+				}).catch(function(e) { ui.hideModal(); note('重启失败：' + e, 'danger'); });
+		} }, '重启代理服务');
+		var pullBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
+			ui.showModal(null, E('p', { 'class': 'spinning' }, '正在拉取订阅…'));
+			sub([ 'update' ]).then(function(out) {
+				ui.hideModal();
+				var ok = /nodes/.test(out);
+				note('订阅更新：' + (out.trim() || '无输出'), ok ? 'info' : 'danger');
+				if (ok) window.setTimeout(function() { location.reload(); }, 1200);
+			}).catch(function(e) { ui.hideModal(); note('拉取失败：' + e, 'danger'); });
+		} }, '拉取订阅');
+
+		/* ------------ mode + devices ------------ */
+		var bProxy = E('button', { 'type': 'button', 'click': function() { wantProxy = true; drawMode(); } }, '代理');
+		var bDirect = E('button', { 'type': 'button', 'click': function() { wantProxy = false; drawMode(); } }, '直连');
+		function drawMode() { bProxy.className = wantProxy ? 'on' : ''; bDirect.className = wantProxy ? '' : 'on'; drawHints(); }
+		var sAll = E('button', { 'type': 'button', 'click': function() { scope = 'all'; drawScope(); } }, '全部设备');
+		var sPick = E('button', { 'type': 'button', 'click': function() { scope = 'pick'; drawScope(); } }, '指定设备');
+
+		var devDD = dropdown(), devHead = E('div', { 'class': 'xr-ddh' }), devList = E('div', { 'class': 'xr-ddl' });
+		var devChips = E('div', { 'class': 'xr-sel' }), devWrap = E('div', {}), devAllTip = E('p', { 'class': 'xr-tip' }, '');
+		function isSel(dv) { return !!(sel[dv.mac] || sel[dv.ip]); }
 		function selectedCount() {
 			var n = 0, known = {};
-			devs.forEach(function(d) { known[d.mac] = 1; known[d.ip] = 1; if (isSel(d)) n++; });
+			devs.forEach(function(dv) { known[dv.mac] = 1; known[dv.ip] = 1; if (isSel(dv)) n++; });
 			Object.keys(sel).forEach(function(k) { if (!known[k]) n++; });
 			return n;
 		}
-		function drawCount() {
-			devCount.textContent = scope === 'all' ? '全部 ' + devs.length + ' 台设备都会走代理' : '已选 ' + selectedCount() + ' / ' + devs.length + ' 台';
-		}
+		function devLabel(dv) { return dv.name || dv.ip; }
 		function drawDevs() {
-			while (devBox.firstChild) devBox.removeChild(devBox.firstChild);
+			var n = selectedCount();
+			devDD.txt.textContent = n ? '已选 ' + n + ' 台设备（点开修改）' : '点这里选择设备';
+			while (devList.firstChild) devList.removeChild(devList.firstChild);
 			function row(title, subtitle, online, checked, toggle) {
-				var cb = E('input', { 'type': 'checkbox', 'change': function() { toggle(cb.checked); drawCount(); } });
-				cb.checked = checked || scope === 'all';
-				cb.disabled = scope === 'all';
-				devBox.appendChild(E('label', { 'class': 'xr-dev' + (scope === 'all' ? ' dis' : '') }, [
+				var cb = E('input', { 'type': 'checkbox', 'change': function() { toggle(cb.checked); drawDevs(); drawHints(); } });
+				cb.checked = checked;
+				devList.appendChild(E('label', { 'class': 'xr-opt' }, [
 					cb, E('span', { 'class': 'xr-dot' + (online ? ' ok' : '') }),
-					E('span', { 'class': 'xr-dn' }, [ title, E('small', {}, subtitle) ]),
-					E('span', { 'class': 'xr-st' }, online ? '在线' : '空闲')
+					E('span', { 'class': 'd' }, [ title, E('small', {}, subtitle) ]),
+					E('span', { 'class': 's' }, online ? '在线' : '空闲')
 				]));
 			}
 			var known = {};
 			devs.forEach(function(dv) {
 				known[dv.mac] = 1; known[dv.ip] = 1;
-				row(dv.name || '未命名设备', dv.ip + ' · ' + dv.mac, dv.online, isSel(dv), function(on) {
+				row(dv.name || '未命名设备', dv.ip, dv.online, isSel(dv), function(on) {
 					if (on) sel[dv.mac] = 1; else { delete sel[dv.mac]; delete sel[dv.ip]; }
 				});
 			});
 			Object.keys(sel).forEach(function(k) {
 				if (known[k]) return;
-				row('已保存的设备（当前未连接）', k, false, true, function(on) { if (!on) delete sel[k]; });
+				row('已保存的设备', k, false, true, function(on) { if (!on) delete sel[k]; });
 			});
-			if (!devBox.firstChild) devBox.appendChild(E('p', { 'class': 'xr-tip' }, '暂时没有发现设备。'));
+			if (!devList.firstChild) devList.appendChild(E('div', { 'class': 'xr-empty' }, '暂时没有发现设备。'));
+			/* what is selected, shown as removable chips under the dropdown */
+			while (devChips.firstChild) devChips.removeChild(devChips.firstChild);
+			function chip(label, remove) {
+				devChips.appendChild(E('span', { 'class': 'xr-sc' }, [ E('span', {}, label), E('button', { 'type': 'button', 'title': '取消选择', 'click': function() { remove(); drawDevs(); drawHints(); } }, '×') ]));
+			}
+			devs.forEach(function(dv) { if (isSel(dv)) chip(devLabel(dv), function() { delete sel[dv.mac]; delete sel[dv.ip]; }); });
+			Object.keys(sel).forEach(function(k) { if (!known[k]) chip(k, function() { delete sel[k]; }); });
 		}
-		function drawScope() { sAll.className = scope === 'all' ? 'on' : ''; sPick.className = scope === 'pick' ? 'on' : ''; drawDevs(); drawCount(); }
-		var pickAll = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { scope = 'pick'; devs.forEach(function(dv) { sel[dv.mac] = 1; }); drawScope(); } }, '全选');
-		var pickNone = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { sel = {}; scope = 'pick'; drawScope(); } }, '全不选');
-		drawScope();
+		function drawScope() {
+			sAll.className = scope === 'all' ? 'on' : ''; sPick.className = scope === 'pick' ? 'on' : '';
+			devWrap.style.display = scope === 'pick' ? '' : 'none';
+			devAllTip.style.display = scope === 'all' ? '' : 'none';
+			devAllTip.textContent = '局域网里全部 ' + devs.length + ' 台设备都会走代理。设备或连接很多时，路由器内存可能吃紧。';
+			drawDevs(); drawHints();
+		}
+		devHead.appendChild(E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { devs.forEach(function(dv) { sel[dv.mac] = 1; }); drawDevs(); drawHints(); } }, '全选'));
+		devHead.appendChild(E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { sel = {}; drawDevs(); drawHints(); } }, '全不选'));
+		devHead.appendChild(E('span', { 'class': 'xr-ddc' }, '按 MAC 地址记录，换 IP 不受影响'));
+		devDD.panel.appendChild(devHead); devDD.panel.appendChild(devList);
+		devWrap.appendChild(devDD.root); devWrap.appendChild(devChips);
+		devWrap.appendChild(E('p', { 'class': 'xr-tip' }, '“空闲”表示最近没有通信，不一定已经离开；手机省电时常会这样。'));
 
 		/* what gets stored: "all", or a list of device MACs (stable across DHCP renewals) */
 		function clientsValue() {
@@ -333,7 +416,7 @@ return view.extend({
 
 		var saveMode = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() {
 			var cv = clientsValue();
-			if (!cv) { note('请至少勾选一台设备；或选择“全部设备”，或把模式切到“直连”。', 'danger'); return; }
+			if (!cv) { note('请至少选择一台设备；或选择“全部设备”，或把模式切到“直连”。', 'danger'); return; }
 			if ((wantProxy ? '1' : '0') !== cfg.enabled) {
 				applyAll([ [ 'enabled', wantProxy ? '1' : '0' ], [ 'clients', cv ] ]);
 				return;
@@ -346,27 +429,148 @@ return view.extend({
 				.catch(function(e) { ui.hideModal(); note('应用失败：' + e, 'danger'); });
 		} }, '保存并应用');
 
-		/* ------------ restart / pull subscription ------------ */
-		var restartBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			ui.showModal(null, E('p', { 'class': 'spinning' }, '正在重启代理服务，请稍候…'));
-			sub([ 'restart' ]).then(function(out) { return new Promise(function(r) { window.setTimeout(function() { r(out); }, 8000); }); })
-				.then(function(out) {
-					return sub([ 'status' ]).then(function(s) {
-						st = parseStatus(s); drawStatus(); ui.hideModal();
-						var ok = out.indexOf('restarted') >= 0;
-						note(ok ? '代理服务已重启。' : '代理目前是关闭状态，没有重启。', ok ? 'info' : 'danger');
-					});
-				}).catch(function(e) { ui.hideModal(); note('重启失败：' + e, 'danger'); });
-		} }, '重启代理服务');
-		var pullBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			ui.showModal(null, E('p', { 'class': 'spinning' }, '正在拉取订阅…'));
-			sub([ 'update' ]).then(function(out) {
-				ui.hideModal();
-				var ok = /nodes/.test(out);
-				note('订阅更新：' + (out.trim() || '无输出'), ok ? 'info' : 'danger');
-				if (ok) window.setTimeout(function() { location.reload(); }, 1200);
-			}).catch(function(e) { ui.hideModal(); note('拉取失败：' + e, 'danger'); });
-		} }, '立即拉取订阅');
+		/* ------------ nodes: pick a region first, then a node of that region ------------ */
+		var cur0 = currentNode(nodes, cfg.node_name), selected = cur0;
+		var q = '';
+		var regionDD = dropdown(), regionList = E('div', { 'class': 'xr-ddl' });
+		var nodeDD = dropdown(), nodeList = E('div', { 'class': 'xr-ddl' }), nodeCount = E('span', { 'class': 'xr-ddc' }, '');
+		var useName = E('span', {}, ''), useBox = E('div', { 'class': 'xr-use' }, [ useName,
+			E('button', { 'type': 'button', 'click': function() {
+				if (selected) applyAll([ [ 'node_name', '^' + esc(selected.name) + '$' ], [ 'enabled', '1' ], [ 'auto_switch', '0' ] ]);   /* a node picked by hand is pinned */
+			} }, '使用此节点') ]);
+		var useBtn = useBox.querySelector('button');
+
+		/* sources (providers), the biggest first; null = all of them */
+		var prov = null, provCount = {}, provOrder = [];
+		nodes.forEach(function(n) { var k = n.info.provider; if (!(k in provCount)) { provCount[k] = 0; provOrder.push(k); } provCount[k]++; });
+		provOrder.sort(function(x, y) { return provCount[y] - provCount[x]; });
+		var provDD = dropdown(), provList = E('div', { 'class': 'xr-ddl' });
+		function provText() { return prov === null ? '全部来源（' + nodes.length + ' 个节点）' : (prov || '未标注') + '（' + provCount[prov] + ' 个节点）'; }
+
+		/* regions of the chosen source, the biggest first, each with a flag taken from one of its nodes */
+		var regionCount, regionFlag, regionOrder, region = cur0 ? cur0.info.region : '';
+		function computeRegions() {
+			regionCount = {}; regionFlag = {}; regionOrder = [];
+			nodes.forEach(function(n) {
+				if (prov !== null && n.info.provider !== prov) return;
+				var k = n.info.region;
+				if (!(k in regionCount)) { regionCount[k] = 0; regionOrder.push(k); }
+				regionCount[k]++;
+				if (!regionFlag[k] && n.info.flag) regionFlag[k] = n.info.flag;
+			});
+			regionOrder.sort(function(x, y) { return regionCount[y] - regionCount[x]; });
+			if (!(region in regionCount)) region = regionOrder[0] || '';
+		}
+		computeRegions();
+
+		function regionText(k) { return (regionFlag[k] ? regionFlag[k] + ' ' : '') + k + '（' + regionCount[k] + ' 个节点）'; }
+		function visible() {
+			return nodes.filter(function(n) { return n.info.region === region && (prov === null || n.info.provider === prov) && (!q || n.name.toLowerCase().indexOf(q) >= 0); });
+		}
+		function drawNodeBtn() {
+			provDD.txt.textContent = provText();
+			regionDD.txt.textContent = region ? regionText(region) : '点这里选择地区';
+			var inRegion = selected && selected.info.region === region;
+			nodeDD.txt.textContent = inRegion ? (selected.info.flag ? selected.info.flag + ' ' : '') + selected.info.title : (region ? '请选择 ' + region + ' 的节点' : '先选地区');
+			var cur = currentNode(nodes, cfg.node_name), changed = selected && (!cur || cur.idx !== selected.idx);
+			useBox.className = 'xr-use' + (changed ? ' show' : '');
+			useName.textContent = changed ? '切换到 ' + selected.info.title : '';
+			useBtn.textContent = autoSw ? '使用并固定' : '使用此节点';
+		}
+		function drawProvs() {
+			while (provList.firstChild) provList.removeChild(provList.firstChild);
+			[ null ].concat(provOrder).forEach(function(k) {
+				var cb = E('input', { 'type': 'checkbox', 'change': function() {
+					prov = k; q = ''; computeRegions(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); provDD.close();
+					regionDD.root.classList.add('open');   /* then the region */
+				} });
+				cb.checked = k === prov;
+				provList.appendChild(E('label', { 'class': 'xr-opt two' + (k === prov ? ' cur' : '') }, [
+					cb, E('span', { 'class': 'n' }, k === null ? '全部来源' : (k || '未标注')),
+					E('span', { 'class': 's' }, (k === null ? nodes.length : provCount[k]) + ' 个')
+				]));
+			});
+		}
+		function drawRegions() {
+			while (regionList.firstChild) regionList.removeChild(regionList.firstChild);
+			regionOrder.forEach(function(k) {
+				var cb = E('input', { 'type': 'checkbox', 'change': function() {
+					region = k; q = ''; drawNodeBtn(); drawRegions(); drawNodes(); regionDD.close();
+					nodeDD.root.classList.add('open');   /* go straight on to the node list */
+				} });
+				cb.checked = k === region;
+				regionList.appendChild(E('label', { 'class': 'xr-opt two' + (k === region ? ' cur' : '') }, [
+					cb, E('span', { 'class': 'f' }, regionFlag[k] || '🌐'), E('span', { 'class': 'n' }, k),
+					E('span', { 'class': 's' }, regionCount[k] + ' 个')
+				]));
+			});
+			if (!regionOrder.length) regionList.appendChild(E('div', { 'class': 'xr-empty' }, '没有节点。请先在“订阅设置”里填写地址并更新。'));
+		}
+		function drawNodes() {
+			var cur = currentNode(nodes, cfg.node_name), list = visible();
+			while (nodeList.firstChild) nodeList.removeChild(nodeList.firstChild);
+			nodeCount.textContent = list.length + ' 个';
+			list.forEach(function(n) {
+				var on = !!(selected && selected.idx === n.idx);
+				var cb = E('input', { 'type': 'checkbox', 'change': function() { selected = n; drawNodeBtn(); drawNodes(); nodeDD.close(); } });
+				cb.checked = on;
+				nodeList.appendChild(E('label', { 'class': 'xr-opt two' + (on ? ' cur' : ''), 'title': n.name }, [
+					cb,
+					E('span', { 'class': 'n' }, [ n.info.title, E('small', {}, badgeText(n.kind) + (n.info.provider ? ' · ' + n.info.provider : '')) ]),
+					cur && cur.idx === n.idx ? E('span', { 'class': 't on' }, '当前') : ''
+				]));
+			});
+			if (!list.length) nodeList.appendChild(E('div', { 'class': 'xr-empty' }, '没有符合条件的节点。'));
+		}
+		(function buildNodePanels() {
+			provDD.panel.appendChild(provList);
+			regionDD.panel.appendChild(regionList);
+			var search = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '在这个地区里搜索', 'autocomplete': 'off',
+				'input': function() { q = search.value.trim().toLowerCase(); drawNodes(); } });
+			nodeDD.panel.appendChild(E('div', { 'class': 'xr-ddh' }, [ search, nodeCount ]));
+			nodeDD.panel.appendChild(nodeList);
+		})();
+
+		/* ---- manual / automatic: a node chosen by hand is pinned and always wins; automatic only moves on when the line is dead ---- */
+		var mManual = E('button', { 'type': 'button', 'click': function() { setNodeMode(false); } }, '手动指定');
+		var mAuto = E('button', { 'type': 'button', 'click': function() { setNodeMode(true); } }, '自动选择');
+		var modeTip = E('p', { 'class': 'xr-tip', 'style': 'margin:-2px 0 8px' }, '');
+		var healthBox = E('div', { 'class': 'xr-status' }, '');
+		function drawNodeMode() {
+			mManual.className = autoSw ? '' : 'on'; mAuto.className = autoSw ? 'on' : '';
+			modeTip.textContent = autoSw
+				? (cfg.chain ? '自动选择：已设置链式出口，为避免来回换节点，这时不会自动切换。' : '自动选择：线路连续 3 次检测失败（约 9 分钟）时，切到同一来源的下一个节点。你在下面手动选一个节点并使用，就会改回“手动指定”并固定它。')
+				: '手动指定：固定使用你选的节点，不会自动更换，即使它不通。';
+			drawNodeBtn(); drawHints();
+		}
+		function setNodeMode(a) {
+			if (a === autoSw) return;
+			autoSw = a; drawNodeMode();
+			sub([ 'set', 'auto_switch', a ? '1' : '0' ]).then(function(out) {
+				if (out.trim() !== 'ok') { note('保存失败：' + out.trim(), 'danger'); return; }
+				cfg.auto_switch = a ? '1' : '0';
+				note(a ? '已改为自动选择。' : '已改为手动指定，不会再自动换节点。', 'info');
+			}).catch(function(e) { note('保存失败：' + e, 'danger'); });
+		}
+		function drawHealth() {
+			while (healthBox.firstChild) healthBox.removeChild(healthBox.firstChild);
+			var t = fmtTime(health.last_ts), line;
+			if (health.last === 'ok') line = [ E('b', {}, '线路检测：正常'), t ? '（' + t + '）' : '' ];
+			else if (health.last === 'fail') line = [ E('b', {}, '线路检测：失败 ' + (health.fails || 0) + ' 次'), autoSw && !cfg.chain ? '（连续 3 次会自动切换）' : '' ];
+			else if (health.last === 'wan-down') line = [ E('b', {}, '线路检测：'), '外网本身不通，没有计入失败。' ];
+			else line = [ E('b', {}, '线路检测：'), '每 3 分钟一次，还没有结果。' ];
+			healthBox.appendChild(E('div', {}, line));
+			if (health.sw_ts && health.sw_to) healthBox.appendChild(E('div', {}, '上次自动切换：' + fmtTime(health.sw_ts) + ' 切到 ' + parseName(health.sw_to).title));
+		}
+		var probeBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'style': 'margin-top:8px', 'click': function() {
+			probeBtn.disabled = true; probeBtn.textContent = '检测中…（最多十几秒）';
+			sub([ 'probe' ]).then(function(out) {
+				probeBtn.disabled = false; probeBtn.textContent = '立即检测';
+				if (/proxy ok/.test(out)) note('线路正常：已通过代理拿到外网的网页响应。', 'info');
+				else if (/FAILED/.test(out)) note('线路不通：外网本身是通的，但经过代理没有拿到响应。可以换个节点，或者用自动选择。', 'danger');
+				else note('外网本身不通（光猫 / 宽带问题），不是代理的问题。', 'danger');
+			}).catch(function(e) { probeBtn.disabled = false; probeBtn.textContent = '立即检测'; note('检测失败：' + e, 'danger'); });
+		}, }, '立即检测');
 
 		/* ------------ subscription ------------ */
 		var subUrl = E('input', { 'class': 'xr-field', 'type': 'password', 'value': cfg.sub_url || '',
@@ -383,12 +587,159 @@ return view.extend({
 				}).catch(function(e) { ui.hideModal(); note('更新失败：' + e, 'danger'); });
 		} }, '保存并更新订阅');
 
+		var subHours = E('select', { 'class': 'xr-field', 'change': function() {
+			sub([ 'set', 'sub_hours', subHours.value ]).then(function(out) {
+				if (out.trim() !== 'ok') { note('保存失败：' + out.trim(), 'danger'); return; }
+				cfg.sub_hours = subHours.value; drawHints(); note('已保存：' + (subHours.value === '0' ? '不再自动更新订阅。' : '订阅每 ' + subHours.value + ' 小时检查一次，内容没变就不重启代理。'), 'info');
+			}).catch(function(e) { note('保存失败：' + e, 'danger'); });
+		} }, [ [ '0', '不自动更新' ], [ '6', '每 6 小时' ], [ '12', '每 12 小时' ], [ '24', '每天（默认）' ], [ '48', '每 2 天' ], [ '168', '每周' ] ].map(function(o) { return E('option', { 'value': o[0] }, o[1]); }));
+		subHours.value = cfg.sub_hours || '24';
+		var subInfo = E('p', { 'class': 'xr-tip' }, '');
+		function drawSubInfo() {
+			subInfo.textContent = '上次检查：' + (fmtTime(cfg.sub_check) || '开机后还没检查') + '；订阅内容上次变化：' + (fmtTime(cfg.sub_change) || '未知') + '。只有节点本身变了才会重启代理（节点名里的延迟数字变化不算）。';
+		}
+
+		/* ------------ split routing exceptions: IPv4 addresses / blocks that always go direct or always through the proxy ------------ */
+		function toLines(v) { return (v || '').split(' ').filter(Boolean).join('\n'); }
+		var IP4 = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;   /* an address or block; anything else on a line is taken as a domain */
+		var taDirect = E('textarea', { 'class': 'xr-field xr-ta', 'rows': '4', 'spellcheck': 'false', 'placeholder': '每行一个，例如\nexample.cn\n203.0.113.0/24' });
+		var taProxy = E('textarea', { 'class': 'xr-field xr-ta', 'rows': '4', 'spellcheck': 'false', 'placeholder': '每行一个，例如\nexample.com\n198.51.100.0/24' });
+		taDirect.value = toLines((cfg.direct_domains || '') + ' ' + (cfg.direct_ips || '')); taProxy.value = toLines((cfg.proxy_domains || '') + ' ' + (cfg.proxy_ips || ''));
+		function tokens4(el) { return el.value.split(/[\s,;，；]+/).filter(Boolean); }
+		var saveSplit = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() {
+			var dv = tokens4(taDirect), pv = tokens4(taProxy);
+			var isIp = function(t) { return IP4.test(t); }, notIp = function(t) { return !IP4.test(t); };
+			var parts = [ [ 'direct_ips', dv.filter(isIp) ], [ 'direct_domains', dv.filter(notIp) ], [ 'proxy_ips', pv.filter(isIp) ], [ 'proxy_domains', pv.filter(notIp) ] ];
+			saveSplit.disabled = true;
+			var chain = Promise.resolve();
+			parts.forEach(function(p) {
+				chain = chain.then(function() { return sub([ 'set', p[0], p[1].join(' ') ]); }).then(function(out) {
+					if (out.trim() !== 'ok') throw new Error((p[0].indexOf('direct') === 0 ? '“强制直连”' : '“强制走代理”') + '里有无效内容：' + out.trim().replace(/^bad value:?\s*/, ''));
+					cfg[p[0]] = p[1].join(' ');
+				});
+			});
+			chain.then(function() { return st.run ? sub([ 'exc-apply' ]) : ''; }).then(function() {
+				saveSplit.disabled = false; drawHints();
+				note('分流例外已保存' + (st.run ? '并生效（只影响之后新建的连接；域名的地址每 5 分钟补全一次）。' : '，代理开启后生效。'), 'info');
+			}).catch(function(e) { saveSplit.disabled = false; note(String(e.message || e), 'danger'); });
+		} }, '保存并生效');
+
+		/* ------------ backup: export / import the settings of this page ------------ */
+		var BAK_KEYS = [ 'enabled', 'node_name', 'auto_switch', 'clients', 'sub_url', 'sub_hours', 'chain', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains' ];
+		var expBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
+			sub([ 'get' ]).then(function(t) {
+				var c = kv(t), o = {}, now = new Date();
+				BAK_KEYS.forEach(function(k) { o[k] = c[k] || ''; });
+				o.auto_switch = c.auto_switch === '1' ? '1' : '0';   /* never set = manual */
+				var blob = new Blob([ JSON.stringify({ type: 'xray-sub-settings', version: 1, exported: now.toISOString(), config: o }, null, 2) ], { type: 'application/json' });
+				var a = E('a', { 'href': URL.createObjectURL(blob), 'download': 'xray-settings-' + now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '.json' });
+				document.body.appendChild(a); a.click(); document.body.removeChild(a);
+			}).catch(function(e) { note('导出失败：' + e, 'danger'); });
+		} }, '导出设置');
+		var impIn = E('input', { 'type': 'file', 'accept': '.json,application/json', 'style': 'display:none' });
+		impIn.addEventListener('change', function() {
+			var f = impIn.files && impIn.files[0]; if (!f) return;
+			var rd = new FileReader();
+			rd.onload = function() {
+				impIn.value = '';
+				var o; try { o = JSON.parse(rd.result); } catch (e) { o = null; }
+				if (!o || o.type !== 'xray-sub-settings' || !o.config || typeof o.config !== 'object') { note('这不是本页导出的设置文件。', 'danger'); return; }
+				var pairs = [];
+				[ 'sub_hours', 'auto_switch', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains', 'chain', 'sub_url', 'clients', 'node_name', 'enabled' ].forEach(function(k) {
+					var v = o.config[k]; if (typeof v !== 'string') return;
+					if ((k === 'sub_hours' || k === 'auto_switch') && v === '') return;
+					pairs.push([ k, v ]);
+				});
+				if (!pairs.length) { note('文件里没有可导入的设置。', 'danger'); return; }
+				if (!window.confirm('将用文件里的设置覆盖当前的：' + pairs.map(function(p) { return p[0]; }).join('、') + '。\n应用后会重启代理。继续吗？')) return;
+				ui.showModal(null, E('p', { 'class': 'spinning' }, '正在导入设置…'));
+				var chain = Promise.resolve();
+				pairs.forEach(function(p) {
+					chain = chain.then(function() { return sub([ 'set', p[0], p[1] ]); }).then(function(out) {
+						if (out.trim() !== 'ok') throw new Error(p[0] + '：' + out.trim());
+						if (p[0] === 'sub_url' && p[1]) return sub([ 'update' ]);
+					});
+				});
+				chain.then(function() { return sub([ 'apply' ]); })
+					.then(function() { return new Promise(function(r) { window.setTimeout(r, 8000); }); })
+					.then(function() { location.reload(); })
+					.catch(function(e) { ui.hideModal(); note('导入失败：' + (e.message || e), 'danger'); });
+			};
+			rd.readAsText(f);
+		});
+		var impBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { impIn.click(); } }, '导入设置');
+
 		/* ------------ chain proxy: the selected node is the FRONT hop, this proxy is the EXIT ------------ */
 		var chainIn = E('input', { 'class': 'xr-field', 'type': 'password', 'value': cfg.chain || '',
-			'placeholder': 'socks5://用户名:密码@地址:端口（留空 = 不使用链式代理）', 'autocomplete': 'off', 'autocapitalize': 'off' });
+			'placeholder': 'socks5://用户名:密码@地址:端口，也可以是 http:// vless:// ss://', 'autocomplete': 'off', 'autocapitalize': 'off' });
 		var chainShow = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
 			var h = chainIn.type === 'password'; chainIn.type = h ? 'text' : 'password'; chainShow.textContent = h ? '隐藏' : '显示'; } }, '显示');
-		var chainOut = E('div', { 'class': 'xr-ptxt', 'style': 'margin-top:12px' }, '');
+		var chainOut = E('div', { 'class': 'xr-ptxt', 'style': 'margin-top:10px' }, '');
+
+		/* two ways to enter it: separate fields (protocol / address / port / user / password), or one complete link */
+		var cProto = E('select', { 'class': 'xr-field' }, [ E('option', { 'value': 'socks5' }, 'SOCKS5'), E('option', { 'value': 'http' }, 'HTTP') ]);
+		var cHost = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '例如 1.2.3.4 或 proxy.example.com', 'autocomplete': 'off', 'autocapitalize': 'off', 'spellcheck': 'false' });
+		var cPort = E('input', { 'class': 'xr-field', 'type': 'text', 'inputmode': 'numeric', 'placeholder': '例如 1080', 'autocomplete': 'off' });
+		var cUser = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '没有就留空', 'autocomplete': 'off', 'autocapitalize': 'off' });
+		var cPass = E('input', { 'class': 'xr-field', 'type': 'password', 'placeholder': '没有就留空', 'autocomplete': 'new-password' });
+		var cPassShow = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
+			var h = cPass.type === 'password'; cPass.type = h ? 'text' : 'password'; cPassShow.textContent = h ? '隐藏' : '显示'; } }, '显示');
+		function fld(label, el, full) { return E('div', { 'class': 'xr-f' + (full ? ' full' : '') }, [ E('span', { 'class': 'xr-fl' }, label), el ]); }
+		var chainForm = E('div', { 'class': 'xr-form' }, [
+			fld('协议', cProto), fld('端口', cPort), fld('地址', cHost, true), fld('用户名', cUser, true),
+			fld('密码', E('div', { 'class': 'xr-row xr-inline' }, [ cPass, cPassShow ]), true)
+		]);
+		var chainLink = E('div', {}, [ E('div', { 'class': 'xr-row xr-inline' }, [ chainIn, chainShow ]),
+			E('p', { 'class': 'xr-tip' }, '支持 socks5://、http://、vless://、ss:// 开头的完整链接。vless / ss 只能用完整链接。') ]);
+		var chainMode = 'fields';
+		var mFields = E('button', { 'type': 'button', 'click': function() {
+			if (chainMode === 'link') {
+				var l = chainIn.value.trim();
+				if (l && !fillFields(l)) { note('这个链接不是 socks5 / http 格式，没法拆成分项，请继续用完整链接。', 'info'); return; }
+				chainMode = 'fields'; drawChainMode();
+			}
+		} }, '分项填写');
+		var mLink = E('button', { 'type': 'button', 'click': function() {
+			if (chainMode === 'fields') {
+				var r = chainFromFields();
+				if (r.value !== undefined) chainIn.value = r.value;
+				chainMode = 'link'; drawChainMode();
+			}
+		} }, '完整链接');
+		function drawChainMode() {
+			mFields.className = chainMode === 'fields' ? 'on' : ''; mLink.className = chainMode === 'link' ? 'on' : '';
+			chainForm.style.display = chainMode === 'fields' ? '' : 'none'; chainLink.style.display = chainMode === 'link' ? '' : 'none';
+		}
+		/* fields -> link; an error text when something is missing or wrong */
+		function chainFromFields() {
+			var host = cHost.value.trim(), port = cPort.value.trim(), user = cUser.value, pass = cPass.value;
+			if (!host && !port && !user && !pass) return { value: '' };
+			if (!host) return { err: '请填写地址。' };
+			if (/[\s\/@?#]/.test(host)) return { err: '地址里不能有空格，也不能有 / @ ? # 这些符号。' };
+			if (!/^\d+$/.test(port) || +port < 1 || +port > 65535) return { err: '端口要填 1–65535 之间的数字。' };
+			if (pass && !user) return { err: '填了密码就需要填用户名。' };
+			var h = host.indexOf(':') >= 0 && host.charAt(0) !== '[' ? '[' + host + ']' : host;
+			var auth = user ? encodeURIComponent(user) + (pass ? ':' + encodeURIComponent(pass) : '') + '@' : '';
+			return { value: cProto.value + '://' + auth + h + ':' + (+port) };
+		}
+		/* link -> fields; false when it is not a plain socks5 / http link */
+		function fillFields(link) {
+			var m = link.match(/^(socks5|socks|http):\/\/(?:([^:@\/]*)(?::([^@\/]*))?@)?(\[[^\]]+\]|[^:\/?#]+):(\d+)\/?$/i);
+			if (!m) return false;
+			var dec = function(x) { try { return decodeURIComponent(x || ''); } catch (e) { return x || ''; } };
+			cProto.value = /^http$/i.test(m[1]) ? 'http' : 'socks5';
+			cUser.value = dec(m[2]); cPass.value = dec(m[3]);
+			cHost.value = m[4].replace(/^\[|\]$/g, ''); cPort.value = m[5];
+			return true;
+		}
+		/* what to test / save: null = invalid (the reason has been shown) */
+		function chainValue() {
+			if (chainMode === 'link') return chainIn.value.trim();
+			var r = chainFromFields();
+			if (r.err) { note(r.err, 'danger'); return null; }
+			return r.value;
+		}
+		if (cfg.chain && !fillFields(cfg.chain)) chainMode = 'link';
 
 		function renderChain(txt, running) {
 			var lines = txt.split('\n'), trace = '', info = null, done = false, err = '';
@@ -420,7 +771,8 @@ return view.extend({
 			});
 		}
 		var chainTestBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			var v = chainIn.value.trim();
+			var v = chainValue();
+			if (v === null) return;
 			if (!v) { note('请先填写链式代理地址。', 'danger'); return; }
 			chainTestBtn.disabled = true; chainOut.textContent = '正在启动测试…';
 			sub([ 'chain-test-start', v ]).then(function(out) {
@@ -436,227 +788,101 @@ return view.extend({
 					.then(function() { location.reload(); });
 			}).catch(function(e) { ui.hideModal(); note('保存失败：' + e, 'danger'); });
 		}
-		var chainSaveBtn = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() { saveChain(chainIn.value.trim()); } }, '保存并应用');
+		var chainSaveBtn = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() { var v = chainValue(); if (v !== null) saveChain(v); } }, '保存并应用');
 		var chainClearBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			if (!(cfg.chain || chainIn.value)) { note('当前没有设置链式代理。', 'info'); return; }
-			chainIn.value = ''; saveChain('');
+			chainIn.value = ''; cHost.value = ''; cPort.value = ''; cUser.value = ''; cPass.value = '';
+			if (!cfg.chain) { note('当前没有设置链式代理。', 'info'); return; }
+			saveChain('');
 		} }, '清除链式代理');
 
-		/* ------------ nodes ------------ */
-		var tags = E('div', { 'class': 'xr-tags' });
-		var grid = E('div', { 'class': 'xr-grid' });
-		var barName = E('b', {}, '');
-		var bar = E('div', { 'class': 'xr-bar' }, [ E('span', {}, [ '切换到 ', barName ]),
-			E('button', { 'type': 'button', 'click': function() {
-				if (selected) applyAll([ [ 'node_name', '^' + esc(selected.name) + '$' ], [ 'enabled', '1' ] ]);
-			} }, '使用此节点') ]);
-		var progBar = E('i', { 'style': 'width:0%' }), progTxt = E('div', { 'class': 'xr-ptxt' }, '');
-		var prog = E('div', { 'class': 'xr-prog' }, [ E('div', { 'class': 'xr-pbar' }, progBar), progTxt ]);
-		var benchInfo = E('span', { 'class': 'xr-tip', 'style': 'margin:0' }, '');
-
-		var provTags = E('div', { 'class': 'xr-tags' });
-		var prov = null;   /* null = every provider, '' = names without a provider prefix */
-
-		/* ---- paging: 125 cards in one long list is a lot of scrolling ---- */
-		var page = 1, pageSize = 24;
-		try { var ps = parseInt(window.localStorage.getItem('xr_page_size'), 10); if (ps === 0 || ps === 12 || ps === 24 || ps === 48) pageSize = ps; } catch (e) { /* storage may be blocked */ }
-		var pagerTop = E('div', { 'class': 'xr-pager' }), pagerBot = E('div', { 'class': 'xr-pager' });
-		function drawPager(total) {
-			var pages = pageSize ? Math.max(1, Math.ceil(total / pageSize)) : 1;
-			if (page > pages) page = pages;
-			[ pagerTop, pagerBot ].forEach(function(box) {
-				while (box.firstChild) box.removeChild(box.firstChild);
-				if (total <= 12) return;   /* nothing to page through */
-				function go(p) { return function() { page = p; drawNodes(); if (box === pagerBot) grid.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; }
-				function pbtn(label, enabled, on, fn) {
-					var b = E('button', { 'type': 'button', 'class': 'xr-pg' + (on ? ' on' : ''), 'click': fn }, label);
-					b.disabled = !enabled; return b;
-				}
-				box.appendChild(pbtn('‹', page > 1, false, go(page - 1)));
-				var shown = {}, last = 0;
-				[ 1, page - 1, page, page + 1, pages ].forEach(function(p) { if (p >= 1 && p <= pages) shown[p] = 1; });
-				Object.keys(shown).map(Number).sort(function(a, b) { return a - b; }).forEach(function(p) {
-					if (last && p - last > 1) box.appendChild(E('span', { 'class': 'xr-pgdot' }, '…'));
-					box.appendChild(pbtn(String(p), true, p === page, go(p))); last = p;
-				});
-				box.appendChild(pbtn('›', page < pages, false, go(page + 1)));
-				var sel = E('select', { 'class': 'xr-psize', 'change': function() {
-					pageSize = parseInt(sel.value, 10); page = 1;
-					try { window.localStorage.setItem('xr_page_size', String(pageSize)); } catch (e) { /* ignore */ }
-					drawNodes();
-				} }, [ [ 12, '每页 12' ], [ 24, '每页 24' ], [ 48, '每页 48' ], [ 0, '全部显示' ] ].map(function(o) { return E('option', { 'value': String(o[0]) }, o[1]); }));
-				sel.value = String(pageSize);
-				box.appendChild(sel);
-				box.appendChild(E('span', { 'class': 'xr-pinfo' }, '共 ' + total + ' 个'));
-			});
-		}
-
-		/* regions / providers, most nodes first */
-		function tally(key) {
-			var c = {}, order = [];
-			nodes.forEach(function(n) { var k = key(n); if (!(k in c)) { c[k] = 0; order.push(k); } c[k]++; });
-			return order.sort(function(a, b) { return c[b] - c[a]; }).map(function(k) { return [ k, c[k] ]; });
-		}
-		var regions = tally(function(n) { return n.info.region; });
-		var provs = tally(function(n) { return n.info.provider; });
-
-		function visible() {
-			return nodes.filter(function(n) { return (!region || n.info.region === region) && (prov === null || n.info.provider === prov); });
-		}
-		/* the exact node numbers shown, so a benchmark tests precisely what you are looking at */
-		function visibleIdx() {
-			if (!region && prov === null) return '.';
-			return visible().map(function(n) { return n.idx; }).join(',') || '0';
-		}
-
-		function drawTags() {
-			function fill(box, items, cur, onPick, allLabel) {
-				while (box.firstChild) box.removeChild(box.firstChild);
-				[ [ null, nodes.length ] ].concat(items).forEach(function(it) {
-					var on = (it[0] === null && cur === (allLabel === '全部地区' ? '' : null)) || (it[0] !== null && it[0] === cur);
-					box.appendChild(E('button', { 'type': 'button', 'class': 'xr-tag' + (on ? ' on' : ''), 'click': function() { onPick(it[0]); } },
-						(it[0] === null ? allLabel : (it[0] || '未标注')) + ' ' + it[1]));
-				});
-			}
-			fill(tags, regions, region, function(r) { region = r === null ? '' : r; page = 1; drawTags(); drawNodes(); benchLabel(); }, '全部地区');
-			if (provs.length > 1) fill(provTags, provs, prov, function(p) { prov = p; page = 1; drawTags(); drawNodes(); benchLabel(); }, '全部来源');
-			else while (provTags.firstChild) provTags.removeChild(provTags.firstChild);
-		}
-
-		function drawNodes() {
+		/* ------------ summaries shown next to each section title ------------ */
+		function drawHints() {
+			hMode.textContent = (wantProxy ? '代理' : '直连') + ' · ' + (scope === 'all' ? '全部设备' : '指定 ' + selectedCount() + ' 台');
 			var cur = currentNode(nodes, cfg.node_name);
-			while (grid.firstChild) grid.removeChild(grid.firstChild);
-			var list = visible();
-			if (sortSpeed) list = list.slice().sort(function(a, b) { return (bench.speed[b.idx] || -1) - (bench.speed[a.idx] || -1); });
-			var total = list.length; drawPager(total);
-			if (pageSize) list = list.slice((page - 1) * pageSize, page * pageSize);
-			list.forEach(function(n) {
-				var sp = bench.speed[n.idx], cls = 'xr-node' + (cur && cur.idx === n.idx ? ' cur' : '') + (selected && selected.idx === n.idx ? ' sel' : '');
-				var pct = sp > 0 ? Math.min(100, Math.round(sp / 15 * 100)) : 0, mc = sp >= 8 ? '' : (sp >= 3 ? 'mid' : 'low');
-				grid.appendChild(E('div', { 'class': cls, 'click': function() {
-					selected = n; barName.textContent = n.info.title; bar.className = 'xr-bar show'; drawNodes(); } }, [
-					E('div', { 'class': 't' }, [ E('span', { 'class': 'f' }, n.info.flag || '🌐'), E('span', {}, n.info.title) ]),
-					E('div', { 'class': 'p' }, [ E('span', { 'class': 'xr-badge' }, badgeText(n.kind)), n.info.provider ]),
-					E('div', { 'class': 'xr-meter' }, E('i', { 'class': mc, 'style': 'width:' + pct + '%' })),
-					E('div', { 'class': 'xr-spd' }, [
-						E('span', {}, sp === undefined ? '未测速' : (sp > 0 ? sp.toFixed(1) + ' Mbps' : '测速失败')),
-						oneBtn(n)
-					])
-				]));
-			});
-			if (!list.length) grid.appendChild(E('p', { 'class': 'xr-tip' }, '没有节点。请先在上面“订阅”里填写地址并更新。'));
+			hNode.textContent = (autoSw ? '自动 · ' : '手动 · ') + (cur ? cur.info.title : '未选择');
+			hChain.textContent = cfg.chain ? '已启用' : '未使用';
+			hSub.textContent = nodes.length + ' 个节点 · ' + (cfg.sub_hours === '0' ? '不自动更新' : '每 ' + (cfg.sub_hours || '24') + ' 小时');
+			var nTok = function(v) { return (v || '').split(' ').filter(Boolean).length; };
+			var nd = nTok(cfg.direct_ips) + nTok(cfg.direct_domains), np = nTok(cfg.proxy_ips) + nTok(cfg.proxy_domains);
+			hSplit.textContent = (nd ? '直连 ' + nd : '') + (nd && np ? ' · ' : '') + (np ? '代理 ' + np : '') || '无';
 		}
 
-		var sortBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			sortSpeed = !sortSpeed; page = 1; sortBtn.textContent = sortSpeed ? '按原顺序' : '按速度排序'; drawNodes(); } }, '按速度排序');
-		/* benchmark exactly these node numbers ("." = all); also used by the per-card "测速" button */
-		function startBench(re, desc) {
-			return sub([ 'bench-start', re ]).then(function(out) {
-				var ok = out.indexOf('started') >= 0;
-				note(ok ? '已开始测速：' + desc + '，每个节点约 10 秒，期间网络可正常使用。' : out.trim(), ok ? 'info' : 'danger');
-				if (ok) { benchInfo.textContent = '测速中…'; bench.running = true; bench.done = 0; bench.total = 0; bench.cur = ''; drawProgress(); drawNodes(); }
-			});
-		}
-		function oneBtn(n) {
-			var testing = bench.running && bench.cur === n.name;
-			var b = E('button', { 'type': 'button', 'class': 'xr-mini', 'click': function(ev) { ev.stopPropagation(); startBench(n.idx, n.info.title); } }, testing ? '测速中…' : '测速');
-			b.disabled = bench.running;
-			return b;
-		}
-		var benchBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
-			startBench(visibleIdx(), region ? '（' + region + '）' : '全部节点');
-		} }, '给全部节点测速');
-		function benchLabel() {
-			var c = visible().length, what = [ region, prov === null ? '' : (prov || '未标注') ].filter(Boolean).join(' · ');
-			benchBtn.textContent = what ? '测速：' + what + '（' + c + ' 个节点）' : '给全部节点测速（' + c + ' 个）';
-		}
-
-		function bestNode() {
-			var best = null;
-			nodes.forEach(function(n) { var s = bench.speed[n.idx]; if (s > 0 && (!best || s > bench.speed[best.idx])) best = n; });
-			return best;
-		}
-		function drawProgress() {
-			benchBtn.disabled = bench.running;
-			if (bench.running) {
-				var pct = bench.total ? Math.round(bench.done * 100 / bench.total) : 4;
-				prog.className = 'xr-prog show';
-				progBar.style.width = Math.max(pct, 4) + '%';
-				progTxt.textContent = '测速中 ' + bench.done + ' / ' + (bench.total || '…') + (bench.cur ? ' · 正在测：' + parseName(bench.cur).title : '');
-			} else if (bench.total > 0 && bench.done >= bench.total) {
-				var b = bestNode();
-				prog.className = 'xr-prog show done';
-				progBar.style.width = '100%';
-				progTxt.textContent = '✔ 测速完成，共测 ' + bench.total + ' 个节点' + (b ? '；速度最快：' + b.info.title + '（' + bench.speed[b.idx].toFixed(1) + ' Mbps）' : '；没有节点测通');
-			} else {
-				prog.className = 'xr-prog';
-			}
-		}
-
-		drawStatus(); drawTags(); drawNodes(); benchLabel(); drawProgress();
-		if (bench.running) benchInfo.textContent = '测速中…';
+		drawStatus(); drawMode(); drawScope(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); drawChainMode(); drawNodeMode(); drawHealth(); drawSubInfo(); drawHints();
 
 		var pollN = 0, devSig = JSON.stringify(devs);
 		poll.add(function() {
 			pollN++;
-			var wantDevs = (pollN % 2 === 0);   /* devices every 10 s, the rest every 5 s */
-			return Promise.all([ sub([ 'status' ]), sub([ 'bench-state' ]), wantDevs ? sub([ 'devices' ]) : Promise.resolve(null) ]).then(function(r) {
-				st = parseStatus(r[0]);
-				var was = bench.running;
-				bench = parseBench(r[1]);
-				benchInfo.textContent = bench.running ? '测速中…' : '';
-				drawStatus(); drawProgress();
+			var wantDevs = (pollN % 2 === 0), wantGet = (pollN % 3 === 0);   /* devices every 10 s, settings every 15 s, the status every 5 s */
+			return Promise.all([ sub([ 'status' ]), sub([ 'health' ]), wantDevs ? sub([ 'devices' ]) : Promise.resolve(null), wantGet ? sub([ 'get' ]) : Promise.resolve(null) ]).then(function(r) {
+				st = parseStatus(r[0]); health = kv(r[1]);
+				/* the node can change by itself (automatic switch): follow it */
+				if (st.node && st.node !== cfg.node_name) {
+					var before = currentNode(nodes, cfg.node_name), pinned = !selected || (before && selected.idx === before.idx);
+					cfg.node_name = st.node;
+					var now = currentNode(nodes, cfg.node_name);
+					if (pinned && now) { selected = now; region = now.info.region; computeRegions(); drawRegions(); }
+					drawNodeBtn(); drawNodes(); if (now) note('节点已切换为：' + now.info.title, 'info');
+				}
+				if (r[3] !== null) { var g = kv(r[3]); cfg.sub_check = g.sub_check; cfg.sub_change = g.sub_change; if (g.auto_switch !== undefined && (g.auto_switch === '1') !== autoSw) { autoSw = g.auto_switch === '1'; cfg.auto_switch = g.auto_switch; drawNodeMode(); } drawSubInfo(); }
+				drawStatus(); drawHealth(); drawHints();
 				if (r[2] !== null) {
 					var nd = parseDevices(r[2]), sig = JSON.stringify(nd);
-					if (sig !== devSig) { devSig = sig; devs = nd; drawDevs(); drawCount(); }
+					if (sig !== devSig) { devSig = sig; devs = nd; drawScope(); }
 				}
-				if (was && !bench.running) note('测速完成：共测 ' + bench.total + ' 个节点，结果已显示在节点卡片上。', 'info');
-				if (bench.running || was) drawNodes();
 			});
 		}, 5);
 
 		return E('div', { 'class': 'xr' }, [
 			E('style', {}, CSS),
-			E('div', { 'class': 'xr-head' }, E('div', { 'class': 'xr-title' }, 'VLESS 透明代理')),
+			E('div', { 'class': 'xr-title' }, 'VLESS 透明代理'),
 			E('p', { 'class': 'xr-sub' }, '国内 IP 直连，其余 TCP 流量走所选节点（仅 VLESS：Reality / WS+TLS，不支持 UDP）。'),
 
-			E('div', { 'class': 'xr-card' }, [ E('div', { 'class': 'xr-h' }, '运行状态'), nowBox, chips,
-				E('div', { 'class': 'xr-row', 'style': 'margin-top:14px' }, [ restartBtn, pullBtn ]) ]),
+			E('div', { 'class': 'xr-card xr-hero' }, [ nowBox, chips, E('div', { 'class': 'xr-two' }, [ restartBtn, pullBtn ]) ]),
 
-			E('div', { 'class': 'xr-card' }, [
-				E('div', { 'class': 'xr-h' }, '模式'),
+			section('代理模式与设备', hMode, E('div', {}, [
 				E('div', { 'class': 'xr-seg' }, [ bProxy, bDirect ]),
-				E('div', { 'class': 'xr-h', 'style': 'margin-top:18px' }, [ '哪些设备走代理', E('span', { 'class': 'xr-tip', 'style': 'margin:0 0 0 auto;font-weight:400' }, devCount) ]),
+				E('p', { 'class': 'xr-tip', 'style': 'margin:-2px 0 10px' }, '代理：国内直连，国外走代理；直连：关闭代理，全部直连。'),
+				E('div', { 'class': 'xr-lab' }, '哪些设备走代理'),
 				E('div', { 'class': 'xr-seg' }, [ sAll, sPick ]),
-				E('div', { 'class': 'xr-row', 'style': 'margin:0 0 10px' }, [ pickAll, pickNone ]),
-				devBox,
-				E('p', { 'class': 'xr-tip' }, '按设备的 MAC 地址记录，设备换了 IP 也不受影响。“空闲”表示最近没有通信，不一定已经离开；手机省电时常会这样。给全部设备开启前请注意：本机内存有限，设备或连接很多时可能吃紧。'),
+				devAllTip, devWrap,
 				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, saveMode)
-			]),
+			])),
 
-			E('div', { 'class': 'xr-card' }, [
-				E('div', { 'class': 'xr-h' }, [ '节点', E('span', { 'class': 'xr-tip', 'style': 'margin:0 0 0 auto' }, benchInfo) ]),
-				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, statsLine(d[5] || '')),
-				tags, provTags, pagerTop, grid, pagerBot,
-				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, [ benchBtn, sortBtn ]),
-				prog,
-				bar
-			]),
+			section('节点选择', hNode, E('div', {}, [
+				E('div', { 'class': 'xr-seg' }, [ mManual, mAuto ]), modeTip,
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, statsLine(d[4] || '')),
+				provOrder.length > 1 ? E('div', {}, [ E('div', { 'class': 'xr-lab', 'style': 'margin-top:0' }, '来源'), provDD.root ]) : '',
+				E('div', { 'class': 'xr-lab', 'style': provOrder.length > 1 ? '' : 'margin-top:0' }, '地区'), regionDD.root,
+				E('div', { 'class': 'xr-lab' }, '节点'), nodeDD.root, useBox,
+				healthBox, probeBtn
+			])),
 
-			E('div', { 'class': 'xr-card' }, [
-				E('div', { 'class': 'xr-h' }, '链式代理（家宽出口）'),
-				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, '留空：流量直接从上面所选的节点出去。填写后：所选节点作为前置，流量再经过这个代理出去，网站看到的是它的 IP（比如家宽出口）。支持 socks5://、http://、vless://、ss:// 格式，例如 socks5://用户名:密码@地址:端口。'),
-				E('div', { 'class': 'xr-row xr-inline' }, [ chainIn, chainShow ]),
-				E('div', { 'class': 'xr-row', 'style': 'margin-top:10px' }, [ chainTestBtn, chainSaveBtn, chainClearBtn ]),
+			section('分流例外', hSplit, E('div', {}, [
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。这里每行写一个域名（如 example.com，它的子域名一并生效）或 IPv4 地址 / 网段（如 1.2.3.0/24）：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
+				E('div', { 'class': 'xr-lab', 'style': 'margin-top:0' }, '强制直连'), taDirect,
+				E('div', { 'class': 'xr-lab' }, '强制走代理'), taProxy,
+				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, saveSplit)
+			])),
+
+			section('链式代理（家宽出口）', hChain, E('div', {}, [
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, '留空：流量直接从所选节点出去。填写后：所选节点作为前置，流量再经过这个代理出去，网站看到的是它的 IP（比如家宽出口）。'),
+				E('div', { 'class': 'xr-seg' }, [ mFields, mLink ]),
+				chainForm, chainLink,
+				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, [ chainTestBtn, chainSaveBtn, chainClearBtn ]),
 				chainOut,
 				E('p', { 'class': 'xr-tip' }, '注意：①前置节点要能访问这个代理的地址，有些家宽代理只允许白名单 IP；②多一跳会更慢；③链式代理失效时，国外流量会直接不通，不会自动回退到所选节点；④账号密码保存在路由器里，页面上默认隐藏；⑤只支持 TCP。')
-			]),
+			])),
 
-			E('div', { 'class': 'xr-card' }, E('details', { 'class': 'xr-det' }, [
-				E('summary', {}, '订阅设置'),
+			section('订阅设置', hSub, E('div', {}, [
 				E('div', { 'class': 'xr-row xr-inline' }, [ subUrl, showBtn ]),
-				E('p', { 'class': 'xr-tip' }, '共 ' + nodes.length + ' 个可用 VLESS 节点；“剩余流量 / 到期”等信息条目已自动忽略。订阅地址包含你的账号凭据，默认隐藏。'),
+				E('p', { 'class': 'xr-tip' }, '“剩余流量 / 到期”等信息条目已自动忽略。订阅地址包含你的账号凭据，默认隐藏。'),
+				E('div', { 'class': 'xr-lab' }, '自动检查更新'), subHours, subInfo,
 				E('div', { 'class': 'xr-row', 'style': 'margin-top:10px' }, subBtn)
+			])),
+
+			section('备份与恢复', hBak, E('div', {}, [
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, '把本页的设置（节点、设备范围、订阅地址、链式出口、分流例外等）存成一个文件，重刷固件或换路由器后导入即可恢复。注意：文件里包含订阅地址和链式代理的账号密码，请妥善保管，不要发给别人。'),
+				E('div', { 'class': 'xr-row' }, [ expBtn, impBtn, impIn ])
 			]))
 		]);
 	}

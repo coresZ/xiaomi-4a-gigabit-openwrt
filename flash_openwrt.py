@@ -429,13 +429,25 @@ PROXY_FILES = [  # (path inside PROXY_DIR, path on the router, mode)
     (f"{S}/luci-app-xray.menu.json", "/usr/share/luci/menu.d/luci-app-xray.json", "644"),
     (f"{S}/luci-app-xray.acl.json", "/usr/share/rpcd/acl.d/luci-app-xray.json", "644"),
     (f"{S}/netmon", "/usr/bin/netmon", "755"),
+    (f"{S}/netmon-block.init", "/etc/init.d/netmon-block", "755"),
     (f"{S}/netmon.js", "/www/luci-static/resources/view/netmon.js", "644"),
     (f"{S}/luci-app-netmon.menu.json", "/usr/share/luci/menu.d/luci-app-netmon.json", "644"),
     (f"{S}/luci-app-netmon.acl.json", "/usr/share/rpcd/acl.d/luci-app-netmon.json", "644"),
     (f"{C_}/xray.nft", "/etc/xray/xray.nft", "600"),
 ]
 CRON_LINES = [("xray-sub watchdog", "* * * * * /usr/bin/xray-sub watchdog >/dev/null 2>&1"),
-              ("xray-sub update", "0 4 * * * /usr/bin/xray-sub update >/dev/null 2>&1 && /etc/init.d/xray restart >/dev/null 2>&1")]
+              ("xray-sub auto-update", "7 * * * * /usr/bin/xray-sub auto-update >/dev/null 2>&1"),
+              ("xray-sub domains-refresh", "*/5 * * * * /usr/bin/xray-sub domains-refresh >/dev/null 2>&1"),
+              ("netmon daily-save", "2 */4 * * * /usr/bin/netmon daily-save >/dev/null 2>&1"),
+              ("netmon daily-save 23", "58 23 * * * /usr/bin/netmon daily-save >/dev/null 2>&1")]
+# kept across a firmware upgrade (sysupgrade.conf); the files that do not exist yet are simply skipped
+# NOT /usr/bin/xr (4.3 MB): restoring it after an upgrade can fill the 7 MB overlay, see tutorial 8.1
+KEEP_FILES = ["/usr/bin/xray-sub", "/usr/bin/netmon", "/etc/init.d/xray", "/etc/init.d/netmon-block",
+              "/etc/rc.d/S95xray", "/etc/rc.d/K10xray", "/etc/rc.d/S20netmon-block", "/etc/xray", "/etc/crontabs/root",
+              "/etc/netmon-alias.tsv", "/etc/netmon-seen.tsv", "/etc/netmon-daily.tsv", "/etc/netmon-quota.tsv", "/etc/netmon-block.tsv",
+              "/www/luci-static/resources/view/xray.js", "/www/luci-static/resources/view/netmon.js",
+              "/usr/share/luci/menu.d/luci-app-xray.json", "/usr/share/luci/menu.d/luci-app-netmon.json",
+              "/usr/share/rpcd/acl.d/luci-app-xray.json", "/usr/share/rpcd/acl.d/luci-app-netmon.json"]
 
 
 def ask_proxy_options():
@@ -494,12 +506,17 @@ def install_proxy(r, opts, prefix=""):
     cron = f"{prefix}/etc/crontabs/root"
     cmd = f"mkdir -p {prefix}/etc/crontabs; touch {cron}; "
     for key, line in CRON_LINES:
-        cmd += f"grep -q {shlex.quote(key)} {cron} || echo {shlex.quote(line)} >> {cron}; "
+        pat = line if key.endswith(" 23") else line.split("/usr/bin/")[1].split(" >")[0]   # "daily-save" has two schedules: the 2nd is matched whole
+        cmd += f"grep -qF {shlex.quote(pat)} {cron} || echo {shlex.quote(line)} >> {cron}; "
+    cmd += f"sed -i '/xray-sub update/d' {cron}; "     # the old daily update+restart is replaced by "auto-update"
+    if not prefix:
+        for f in KEEP_FILES:
+            cmd += f"grep -qxF {shlex.quote(f)} /etc/sysupgrade.conf || echo {shlex.quote(f)} >> /etc/sysupgrade.conf; "
     r.run(cmd)
     r.run("rm -rf /tmp/xf_inst")
     if prefix:
         return
-    r.run("/etc/init.d/cron enable; /etc/init.d/cron restart; /etc/init.d/xray enable; /etc/init.d/rpcd restart; "
+    r.run("/etc/init.d/cron enable; /etc/init.d/cron restart; /etc/init.d/xray enable; /etc/init.d/netmon-block enable; /etc/init.d/rpcd restart; "
           "rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/*")
     started = False
     have_sub = bool(r.run("uci -q get xray.main.sub_url")[0].strip())

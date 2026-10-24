@@ -3,9 +3,27 @@
 D=/etc/xray
 cfg() { uci -q get xray.main.$1; }
 mainpid() { ps | grep "[x]r -sub" | grep -v -- "-port 7893" | awk '{print $1}' | head -1; }
-# when memory runs out the kernel must sacrifice a benchmark instance, never the proxy that devices use
+# when memory runs out the kernel must sacrifice a test instance (chain test), never the proxy that devices use
 protect() { MP=$(mainpid); [ -n "$MP" ] && echo -800 > /proc/$MP/oom_score_adj 2>/dev/null; }
 rules_off() { nft delete table ip xray 2>/dev/null; nft delete table ip6 xray6 2>/dev/null; }
+TAB=$(printf '\t')
+HD=/tmp/xray.h            # health state, one tiny file per value (RAM only)
+ALIAS=/etc/netmon-alias.tsv
+# the node_name stored in uci is a regular expression: same escaping as the web page uses
+esc_re() { sed 's/[].*+?^${}()|[\\]/\\&/g'; }
+# "81ms" in a node name changes with every refresh of the subscription: match any number there
+fuzzy_ms() { sed 's/[0-9][0-9]*ms/[0-9]+ms/g'; }
+# a list of IPv4 addresses / CIDR blocks separated by blanks -> only the valid ones, joined with ", " (empty when none)
+ip_elems() {
+	printf '%s\n' "$1" | tr ' ' '\n' | awk '
+		NF && $0 ~ /^([0-9]+\.){3}[0-9]+(\/[0-9]+)?$/ {
+			split($0, p, "/"); split(p[1], o, "."); ok = 1
+			for (i = 1; i <= 4; i++) if (o[i] + 0 > 255) ok = 0
+			if (p[2] != "" && p[2] + 0 > 32) ok = 0
+			if (ok) printf "%s%s", (n++ ? ", " : ""), $0
+		}
+		END { if (n) print "" }'
+}
 
 # The node list and statistics only depend on sub.txt, but computing them means starting xr, which has to unpack
 # ~15 MB in RAM (slow, and several at once exhaust memory). So compute once, cache in /tmp, and let only one run at a time.
@@ -28,18 +46,226 @@ ensure_cache() {
 	rmdir "$LK" 2>/dev/null   # a stuck lock: clear it so the next call can try again
 	return 1
 }
+# ---- exceptions by domain: the router resolves each listed domain itself (a fresh lookup + what the devices resolved, from
+# netmon's name map in RAM) and keeps the addresses in the "direct4" / "proxy4" sets. The last known addresses are kept in
+# flash so they are there right after a reboot. Every 5 minutes (cron) the sets are brought up to date.
+EXC_CACHE=$D/domain-ips.tsv
+is_domain() { echo "$1" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$' && [ ${#1} -le 253 ]; }
+norm_domain() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/^\*\.//; s/^\.//; s/\.$//'; }
+resolve_domains() {
+	doms="$(cfg direct_domains) $(cfg proxy_domains)"
+	if [ -z "$(echo $doms)" ]; then [ -f $EXC_CACHE ] && rm -f $EXC_CACHE; return 0; fi
+	DM=/tmp/netmon/dnsmap.tsv; [ -f $DM ] || DM=/dev/null
+	CA=$EXC_CACHE; [ -f $CA ] || CA=/dev/null
+	{
+		for d in $doms; do echo "W$TAB$d"; done
+		for d in $doms; do nslookup "$d" 127.0.0.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sed "s/^/N$TAB$d$TAB/"; done
+	} > /tmp/xray.exc.in
+	for d in $doms; do echo "$d"; done > /tmp/xray.exc.doms
+	grep -F -f /tmp/xray.exc.doms $DM > /tmp/xray.exc.dm 2>/dev/null; rm -f /tmp/xray.exc.doms
+	awk -F"$TAB" '
+		function add(d, ip) {
+			if (ip ~ /^(0|10|127)\./ || ip ~ /^192\.168\./ || ip ~ /^169\.254\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[01])\./ || ip ~ /^2(2[4-9]|[3-5][0-9])\./) return
+			if (cnt[d] >= 120 || ((d SUBSEP ip) in has)) return
+			has[d SUBSEP ip] = 1; cnt[d]++; ord[d] = ord[d] " " ip
+		}
+		FILENAME == ARGV[1] { if ($1 == "W") want[$2] = 1; else if ($1 == "N") add($2, $3); next }
+		FILENAME == ARGV[2] { c = split($3, lb, "."); s = ""; for (k = c; k >= 1; k--) { s = (s == "" ? lb[k] : lb[k] "." s); if (s in want) add(s, $2) } next }
+		FILENAME == ARGV[3] { if ($1 in want) { m = split($2, a, " "); for (i = 1; i <= m; i++) add($1, a[i]) } next }
+		END { for (d in want) if (cnt[d]) print d "\t" substr(ord[d], 2) }' /tmp/xray.exc.in /tmp/xray.exc.dm $CA | sort > /tmp/xray.exc.out
+	rm -f /tmp/xray.exc.in /tmp/xray.exc.dm
+	# flash is only written when the answer really changed
+	if [ -s /tmp/xray.exc.out ]; then
+		{ [ -f $EXC_CACHE ] && cmp -s /tmp/xray.exc.out $EXC_CACHE; } || cp /tmp/xray.exc.out $EXC_CACHE
+	fi
+	rm -f /tmp/xray.exc.out
+}
+# "a, b, c": the addresses / blocks of one list plus the current addresses of its domains
+exc_elems() {
+	dips=$(awk -F"$TAB" -v list=" $(cfg ${1}_domains) " 'index(list, " " $1 " ") { print $2 }' $EXC_CACHE 2>/dev/null)
+	ip_elems "$(cfg ${1}_ips) $dips"
+}
+# push the lists into the running rules without reloading them
+exc_apply() {
+	nft list set ip xray proxy4 >/dev/null 2>&1 || return 0
+	for kind in proxy direct; do
+		e=$(exc_elems $kind); sig=$(printf '%s' "$e" | md5sum | cut -d' ' -f1)
+		[ "$sig" = "$(cat /tmp/xray.exc.$kind 2>/dev/null)" ] && continue
+		nft flush set ip xray ${kind}4 2>/dev/null
+		if [ -n "$e" ]; then nft add element ip xray ${kind}4 "{ $e }" || { echo "could not load the $kind list" >&2; continue; }; fi
+		echo "$sig" > /tmp/xray.exc.$kind
+	done
+}
+
+# ---- is the proxy path alive? Send a tiny HTTP request to a foreign IP from the router itself. A temporary output rule
+# hands that one connection to the running proxy (no extra process, no download), so the whole chain is exercised.
+probe_one() {
+	nft delete table ip xhealth 2>/dev/null
+	nft add table ip xhealth && nft add chain ip xhealth out '{ type nat hook output priority -100 ; }' \
+		&& nft add rule ip xhealth out ip daddr $1 tcp dport 80 redirect to :"${2:-$(cfg port)}" || { nft delete table ip xhealth 2>/dev/null; return 1; }
+	# the redirect always completes the TCP handshake with the local proxy, so only a real HTTP answer proves the whole path works
+	r=$(wget -T 6 -O /dev/null "http://$1/" 2>&1); rc=$?
+	nft delete table ip xhealth 2>/dev/null
+	[ $rc = 0 ] && return 0
+	case "$r" in *"HTTP error"*) return 0 ;; esac
+	return 1
+}
+probe_proxy() { probe_one 1.1.1.1 "$1" || probe_one 1.0.0.1 "$1"; }
+probe_wan() { ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 119.29.29.29 >/dev/null 2>&1; }
+# the node to move to: the next one of the same source (text before the first "-"), else the next one of any source
+pick_next() {
+	ensure_cache; cur=$(cfg node_name); curprov=""; first=""; after=""; seen=0
+	while IFS="$TAB" read i name kind; do
+		[ -n "$name" ] || continue
+		e="^$(printf '%s' "$name" | esc_re | fuzzy_ms)\$"
+		if [ "$e" = "$cur" ]; then seen=1; curprov="${name%%-*}"; case "$name" in *-*) ;; *) curprov="" ;; esac; fi
+	done < "$LC"
+	seen2=0
+	while IFS="$TAB" read i name kind; do
+		[ -n "$name" ] || continue
+		e="^$(printf '%s' "$name" | esc_re | fuzzy_ms)\$"
+		if [ "$e" = "$cur" ]; then seen2=1; continue; fi
+		if [ -n "$curprov" ]; then case "$name" in "$curprov"-*) ;; *) continue ;; esac; fi
+		[ -n "$first" ] || first="$name"
+		[ $seen2 = 1 ] && [ -z "$after" ] && after="$name"
+	done < "$LC"
+	[ -n "$after" ] && { echo "$after"; return 0; }
+	[ -n "$first" ] && { echo "$first"; return 0; }
+	return 1
+}
+failover() {
+	now=$(date +%s); last=$(cat $HD/sw_ts 2>/dev/null || echo 0)
+	[ $((now - last)) -ge 600 ] || return 0
+	nn=$(pick_next) || return 0
+	[ -n "$nn" ] || return 0
+	if [ -n "$DRYRUN" ]; then echo "would switch to: $nn"; return 0; fi
+	from=$(cfg node_name)
+	uci set xray.main.node_name="^$(printf '%s' "$nn" | esc_re | fuzzy_ms)\$" && uci commit xray
+	echo "$from" > $HD/sw_from; echo "$nn" > $HD/sw_to; echo "$now" > $HD/sw_ts; echo 0 > $HD/fails
+	logger -t xray-sub "proxy probe failed 3 times in a row: switching node to $nn"
+	/etc/init.d/xray restart >/dev/null 2>&1
+}
+health_check() {
+	[ "$(cfg enabled)" = 1 ] || return 0
+	if [ -z "$FORCE" ]; then m=$(date +%M); m=${m#0}; [ $(( ${m:-0} % 3 )) -eq 0 ] || return 0; fi
+	mkdir -p $HD
+	if probe_proxy "$PROBE_PORT"; then
+		echo 0 > $HD/fails; echo ok > $HD/last; date +%s > $HD/ok_ts
+	elif probe_wan; then
+		f=$(cat $HD/fails 2>/dev/null || echo 0); f=$((f + 1)); echo $f > $HD/fails; echo fail > $HD/last
+		logger -t xray-sub "proxy probe failed ($f)"
+		# no switching while a chain exit is set (a bad exit would just rotate through every node)
+		[ "$f" -ge 3 ] && [ "$(cfg auto_switch)" = 1 ] && [ -z "$(cfg chain)" ] && failover
+	else
+		echo wan-down > $HD/last
+	fi
+	date +%s > $HD/last_ts
+}
+fresh_ts() { date -r "$1" +%s 2>/dev/null || echo 0; }
+
 case "$1" in
 update)
 	URL=$(cfg sub_url); [ -n "$URL" ] || { echo "xray.main.sub_url is not set"; exit 1; }
 	wget -q -T 20 -U 'v2rayN/6.0' -O /tmp/sub.new "$URL" || { echo "download failed"; rm -f /tmp/sub.new; exit 1; }
-	n=$(/usr/bin/xr -sub /tmp/sub.new -list 2>/dev/null | wc -l)
+	n=$( ( echo 1000 > /proc/self/oom_score_adj 2>/dev/null; exec /usr/bin/xr -sub /tmp/sub.new -list 2>/dev/null ) | wc -l)
 	[ "$n" -ge 1 ] || { echo "no vless nodes found, keeping the old list"; rm -f /tmp/sub.new; exit 1; }
-	mv /tmp/sub.new $D/sub.txt; chmod 600 $D/sub.txt; rm -f /tmp/bench.txt; echo "$n nodes"
+	mv /tmp/sub.new $D/sub.txt; chmod 600 $D/sub.txt; date +%s > /tmp/xray.subcheck; echo "$n nodes"
 	# rebuild the cached list/statistics now, while nobody is waiting for the page
 	rm -f "$LC" "$SC"; ensure_cache
 	;;
+auto-update)
+	# cron runs this every hour; it only acts when the chosen interval (xray.main.sub_hours, default 24, 0 = never) has passed
+	h=$(cfg sub_hours); h=${h:-24}
+	[ "$h" -gt 0 ] 2>/dev/null || exit 0
+	[ -n "$(cfg sub_url)" ] || exit 0
+	now=$(date +%s); last=$(cat /tmp/xray.subcheck 2>/dev/null || echo 0)
+	[ $((now - last)) -ge $((h * 3600 - 300)) ] || exit 0
+	echo "$now" > /tmp/xray.subcheck
+	wget -q -T 20 -U 'v2rayN/6.0' -O /tmp/sub.auto "$(cfg sub_url)" || { rm -f /tmp/sub.auto; logger -t xray-sub "subscription check: download failed"; exit 1; }
+	# node names carry a latency that changes on every refresh, so compare the subscriptions without the names (#...).
+	# The subscription is base64: decode it with ucode (a few hundred KB of RAM; an awk decoder used 6 MB and got killed once).
+	# An empty answer means "could not read it": then nothing is replaced and nothing is restarted.
+	fp() {
+		d=$(ucode -e 'import { stdin } from "fs"; let s = stdin.read("all"); let r = b64dec(replace(s, /[ \r\n\t]/g, "")); if (r != null) print(r);' < "$1" 2>/dev/null)
+		case "$d" in *://*) printf '%s\n' "$d" | sed 's/#.*$//' | md5sum | cut -d' ' -f1 ;; esac
+	}
+	f1=$(fp /tmp/sub.auto); f0=$(fp $D/sub.txt)
+	if [ -z "$f1" ] || [ -z "$f0" ]; then rm -f /tmp/sub.auto; logger -t xray-sub "subscription check: could not compare, keeping the current list"; echo "cannot compare"; exit 1; fi
+	if [ "$f1" = "$f0" ]; then rm -f /tmp/sub.auto; echo unchanged; exit 0; fi
+	# reading the new list means starting xr (about 15 MB): not while memory is short, and as the first victim if it gets short anyway
+	avail=$(free -k | awk 'NR==2{print $NF}')
+	if [ "${avail:-0}" -lt 16000 ]; then rm -f /tmp/sub.auto /tmp/xray.subcheck; logger -t xray-sub "subscription check: not enough free memory (${avail} KB), will retry"; echo "low memory, retry later"; exit 1; fi
+	n=$( ( echo 1000 > /proc/self/oom_score_adj 2>/dev/null; exec /usr/bin/xr -sub /tmp/sub.auto -list 2>/dev/null ) | wc -l)
+	[ "$n" -ge 1 ] || { rm -f /tmp/sub.auto; logger -t xray-sub "subscription check: no vless nodes in the new list, keeping the old one"; exit 1; }
+	mv /tmp/sub.auto $D/sub.txt; chmod 600 $D/sub.txt
+	rm -f "$LC" "$SC"; ensure_cache
+	logger -t xray-sub "subscription changed: $n nodes, restarting the proxy"
+	[ "$(cfg enabled)" = 1 ] && /etc/init.d/xray restart >/dev/null 2>&1
+	echo "changed $n nodes"
+	;;
 list)
 	ensure_cache; cat "$LC" 2>/dev/null
+	;;
+health)
+	echo "auto=$([ "$(cfg auto_switch)" = 1 ] && echo 1 || echo 0)"
+	echo "chain=$([ -n "$(cfg chain)" ] && echo 1 || echo 0)"
+	for k in last last_ts ok_ts fails sw_ts sw_from sw_to; do echo "$k=$(cat $HD/$k 2>/dev/null)"; done
+	;;
+probe)
+	# xray-sub probe [port] : run the health check once, right now, and say what it found (no switching); [port] = test against another local port
+	if probe_proxy "$2"; then echo "proxy ok"; elif probe_wan; then echo "proxy FAILED (the internet itself is reachable)"; else echo "no internet on the WAN side"; fi
+	;;
+pick-next)
+	pick_next
+	;;
+switch-next)
+	# xray-sub switch-next : move to the next node of the same source right now (what the automatic switch does)
+	rm -f $HD/sw_ts; failover
+	;;
+exc-list)
+	# "proxy|direct <TAB> entry", entries are addresses, blocks or domains
+	for t in $(cfg proxy_ips) $(cfg proxy_domains); do echo "proxy$TAB$t"; done
+	for t in $(cfg direct_ips) $(cfg direct_domains); do echo "direct$TAB$t"; done
+	;;
+exc-add)
+	# xray-sub exc-add <proxy|direct> <ip|cidr|domain> : always send this destination through the proxy / always direct
+	kind="$2"; tok=$(norm_domain "$3")
+	case "$kind" in proxy) other=direct ;; direct) other=proxy ;; *) echo "bad kind"; exit 1 ;; esac
+	if [ -n "$(ip_elems "$tok")" ]; then key=ips; elif is_domain "$tok"; then key=domains; else echo "bad value: $3"; exit 1; fi
+	cur=$(cfg ${kind}_$key); newoth=""
+	for x in $(cfg ${other}_$key); do [ "$x" = "$tok" ] || newoth="$newoth $x"; done
+	case " $cur " in *" $tok "*) ;; *) cur="$cur $tok" ;; esac
+	[ $(echo $cur | wc -w) -le 300 ] || { echo "too many entries"; exit 1; }
+	uci set xray.main.${kind}_$key="$(echo $cur)"; uci set xray.main.${other}_$key="$(echo $newoth)"; uci commit xray
+	[ -n "$(mainpid)" ] && { resolve_domains; exc_apply; }
+	echo ok
+	;;
+exc-del)
+	# xray-sub exc-del <ip|cidr|domain> : take the entry out of both lists
+	tok=$(norm_domain "$2"); [ -n "$tok" ] || { echo "no entry"; exit 1; }
+	for l in direct_ips proxy_ips direct_domains proxy_domains; do
+		new=""; for x in $(cfg $l); do [ "$x" = "$tok" ] || new="$new $x"; done
+		[ "$(echo $new)" = "$(cfg $l)" ] || uci set xray.main.$l="$(echo $new)"
+	done
+	uci commit xray
+	[ -n "$(mainpid)" ] && { resolve_domains; exc_apply; }
+	echo ok
+	;;
+exc-apply)
+	# xray-sub exc-apply : load the current exception lists into the running rules now
+	[ -n "$(mainpid)" ] && { resolve_domains; exc_apply; }
+	echo ok
+	;;
+domains-refresh)
+	# cron, every 5 minutes: keep the addresses of the listed domains up to date in the running rules
+	[ -n "$(echo $(cfg direct_domains) $(cfg proxy_domains))" ] || exit 0
+	[ -n "$(mainpid)" ] || exit 0
+	resolve_domains; exc_apply
+	;;
+use-node)
+	# xray-sub use-node "<exact node name>" : select that node (stored as a pattern that survives latency changes in the name)
+	[ -n "$2" ] || { echo "no name"; exit 1; }
+	uci set xray.main.node_name="^$(printf '%s' "$2" | esc_re | fuzzy_ms)\$" && uci commit xray && echo ok
 	;;
 stats)
 	# what the subscription contains and what was left out
@@ -72,8 +298,13 @@ rules)
 			# nothing in the list was understood: proxy nobody rather than everybody
 			CL="return"; CL6="return"
 		fi
-		sed -e "s/@PORT@/${port:-7892}/" -e "s#@CLIENT@#$CL#" -e "s#@CLIENT6@#$CL6#" $D/xray.nft > /tmp/xray.rules.nft
-		nft -f /tmp/xray.rules.nft && echo "rules on (clients: ${clients:-all})"
+		# user exceptions (xray.main.direct_ips / proxy_ips): IPv4 addresses or CIDR blocks, checked before the China list
+		DE=""; PE=""
+		sed -e "s/@PORT@/${port:-7892}/" -e "s#@CLIENT@#$CL#" -e "s#@CLIENT6@#$CL6#" -e "s#@DIRECT@#$DE#" -e "s#@PROXY@#$PE#" $D/xray.nft > /tmp/xray.rules.nft
+		if nft -f /tmp/xray.rules.nft; then
+			echo "rules on (clients: ${clients:-all})"
+			rm -f /tmp/xray.exc.proxy /tmp/xray.exc.direct; resolve_domains; exc_apply
+		fi
 		rm -f /tmp/xray.rules.nft
 		;;
 	off) rules_off; echo "rules off" ;;
@@ -89,6 +320,7 @@ watchdog)
 			sleep 2
 			nft list chain ip xray pre >/dev/null 2>&1 || "$0" rules on >/dev/null
 		fi
+		health_check
 	else
 		rules_off
 	fi
@@ -103,81 +335,49 @@ devices)
 		iwinfo $w assoclist 2>/dev/null | awk 'tolower($1) ~ /^[0-9a-f][0-9a-f]:/ {print tolower($1)}' >> /tmp/xray.wifi
 	done
 	ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" && $NF != "FAILED" && $NF != "INCOMPLETE" { print $1 "\t" tolower($3) "\t" $NF }' > /tmp/xray.neigh
+	AL=$ALIAS; [ -f "$AL" ] || AL=/dev/null
 	awk '
 		FILENAME == ARGV[1] { wifi[$1] = 1; next }
 		FILENAME == ARGV[2] { split($0, a, "\t"); nmac[a[1]] = a[2]; nst[a[1]] = a[3]; next }
+		FILENAME == ARGV[3] { split($0, a, "\t"); al[a[1]] = a[2]; next }
 		{
 			ip = $3; mac = tolower($2); name = ($4 == "*" || $4 == "") ? "-" : $4; seen[ip] = 1
+			if (mac in al) name = al[mac]
 			on = (mac in wifi) || (ip in nst && nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
 			print ip "\t" name "\t" mac "\t" (on ? 1 : 0)
 		}
 		END {
 			for (ip in nmac) if (!(ip in seen)) {
 				on = (nmac[ip] in wifi) || (nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
-				print ip "\t-\t" nmac[ip] "\t" (on ? 1 : 0)
+				print ip "\t" ((nmac[ip] in al) ? al[nmac[ip]] : "-") "\t" nmac[ip] "\t" (on ? 1 : 0)
 			}
-		}' /tmp/xray.wifi /tmp/xray.neigh /tmp/dhcp.leases 2>/dev/null | sort -t. -k4 -n
+		}' /tmp/xray.wifi /tmp/xray.neigh "$AL" /tmp/dhcp.leases 2>/dev/null
 	rm -f /tmp/xray.wifi /tmp/xray.neigh
 	;;
-bench)
-	# xray-sub bench [regex]  - download a few MB through each node, print a ranking
-	re="${2:-.}"; TP=7893; OUT=/tmp/bench.txt
-	nft delete table ip xbench 2>/dev/null
-	nft add table ip xbench
-	nft add chain ip xbench out '{ type nat hook output priority -100 ; }'
-	# only port 80 is intercepted: WS nodes sit behind Cloudflare and are dialed on 443, so they must not be caught by this rule
-	nft add rule ip xbench out ip daddr { 162.159.0.0/16, 104.16.0.0/12, 172.64.0.0/13, 141.101.64.0/18, 108.162.192.0/18 } tcp dport 80 redirect to :$TP
-	# "3,5,9" = exactly these node numbers; anything else is a regular expression on the node list
-	case "$re" in
-	*[!0-9,]*|"") ;;
-	*) re="^($(echo "$re" | tr ',' '|'))$(printf '\t')" ;;
-	esac
-	ensure_cache; grep -E "$re" "$LC" > /tmp/bench.list
-	# keep earlier results of nodes that are NOT part of this run
-	cut -f1 /tmp/bench.list > /tmp/bench.idx
-	: > $OUT.keep
-	[ -s $OUT ] && while IFS= read -r l; do
-		i=$(echo "$l" | sed -n 's/.*#\([0-9][0-9]*\) .*/\1/p')
-		grep -qx "$i" /tmp/bench.idx || echo "$l" >> $OUT.keep
-	done < $OUT
-	mv $OUT.keep $OUT
-	total=$(wc -l < /tmp/bench.list); done_n=0; PROG=/tmp/bench.progress
-	echo "0 $total" > $PROG
-	while IFS="$(printf '\t')" read i name kind; do
-		echo "$done_n $total $name" > $PROG
-		GOGC=50 GOMEMLIMIT=18MiB /usr/bin/xr -sub $D/sub.txt -n $i -port $TP >/dev/null 2>&1 </dev/null &
-		P=$!; w=0
-		echo 1000 > /proc/$P/oom_score_adj 2>/dev/null
-		while [ $w -lt 10 ] && ! netstat -ltn 2>/dev/null | grep -q ":$TP "; do sleep 1; w=$((w+1)); done
-		t0=$(cut -d' ' -f1 /proc/uptime)
-		# no "timeout" applet and no fractional sleep here: wait() for wget, a watchdog kills it after 15 s
-		rm -f /tmp/bench.dl
-		wget -4 -qO /tmp/bench.dl -T 8 "http://speed.cloudflare.com/__down?bytes=3000000" >/dev/null 2>&1 </dev/null &
-		WP=$!
-		( sleep 15; kill -9 $WP 2>/dev/null ) >/dev/null 2>&1 &
-		KP=$!
-		wait $WP 2>/dev/null
-		t1=$(cut -d' ' -f1 /proc/uptime)
-		kill $KP 2>/dev/null
-		b=0; [ -f /tmp/bench.dl ] && b=$(wc -c < /tmp/bench.dl); rm -f /tmp/bench.dl
-		alive=0; kill -0 $P 2>/dev/null && alive=1
-		kill -9 $P 2>/dev/null; wait $P 2>/dev/null
-		w=0; while [ $w -lt 5 ] && netstat -ltn 2>/dev/null | grep -q ":$TP "; do sleep 1; w=$((w+1)); done
-		# the test instance died during the run (killed for lack of memory): that says nothing about the node, so do not record a result
-		if [ $alive = 0 ]; then echo "#$i $name: test instance was killed (low memory), skipped" >> /tmp/bench.log; done_n=$((done_n+1)); continue; fi
-		echo "$i	$name	$b	$t0	$t1" | awk -F'\t' '{d=$5-$4; if(d<0.05)d=0.05; printf "%6.2f Mbps  %5.1fs  %4.1f/3MB  #%s %s\n", $3*8/1000000/d, d, $3/1000000, $1, $2}' >> $OUT
-		done_n=$((done_n+1))
-	done < /tmp/bench.list
-	echo "$total $total" > $PROG
-	nft delete table ip xbench 2>/dev/null
-	sort -rn $OUT
-	rm -f /tmp/bench.list /tmp/bench.idx
-	;;
 get)
-	for k in enabled node_name node clients sub_url port chain; do echo "$k=$(cfg $k)"; done
+		for k in enabled node_name node clients sub_url port chain sub_hours auto_switch direct_ips proxy_ips direct_domains proxy_domains; do echo "$k=$(cfg $k)"; done
+		echo "sub_check=$(cat /tmp/xray.subcheck 2>/dev/null)"; echo "sub_change=$(fresh_ts $D/sub.txt)"
 	;;
 set)
-	case "$2" in enabled|node_name|node|clients|sub_url|port|chain) ;; *) echo "bad key"; exit 1 ;; esac
+		case "$2" in enabled|node_name|node|clients|sub_url|port|chain|sub_hours|auto_switch|direct_ips|proxy_ips|direct_domains|proxy_domains) ;; *) echo "bad key"; exit 1 ;; esac
+		case "$2" in
+		node_name) set -- "$1" "$2" "$(printf '%s' "$3" | fuzzy_ms)" ;;
+		sub_hours) echo "$3" | grep -qE '^[0-9]{1,3}$' && [ "$3" -le 720 ] || { echo "bad value"; exit 1; } ;;
+		direct_domains|proxy_domains)
+			cnt=0; clean=""
+			for t in $3; do
+				t=$(norm_domain "$t"); is_domain "$t" || { echo "bad value: $t"; exit 1; }
+				cnt=$((cnt + 1)); clean="$clean $t"
+			done
+			[ $cnt -le 300 ] || { echo "too many entries (max 300)"; exit 1; }
+			set -- "$1" "$2" "$(echo $clean)" ;;
+		auto_switch) case "$3" in 0|1) ;; *) echo "bad value"; exit 1 ;; esac ;;
+		direct_ips|proxy_ips)
+			# every item must be a valid IPv4 address or CIDR block; the stored value is the cleaned list
+			cnt=0; for t in $3; do cnt=$((cnt + 1)); [ -n "$(ip_elems "$t")" ] || { echo "bad value: $t"; exit 1; }; done
+			[ $cnt -le 300 ] || { echo "too many entries (max 300)"; exit 1; }
+			set -- "$1" "$2" "$(echo $3)" ;;
+		esac
 	case "$3" in *"
 "*) echo "bad value"; exit 1 ;; esac
 	# a chain address is checked before it is stored: a bad one would stop the proxy from starting
@@ -190,7 +390,6 @@ chain-test-start)
 	# xray-sub chain-test-start [address] : use the selected node as the front hop and report where traffic leaves
 	[ -n "${2:-$(cfg chain)}" ] || { echo "no chain address set"; exit 1; }
 	err=$(/usr/bin/xr -check-chain "${2:-$(cfg chain)}" 2>&1) || { echo "$err"; exit 1; }
-	ps | grep -q '[x]ray-sub bench ' && { echo "a speed test is running, try again in a moment"; exit 1; }
 	ps | grep -q '[x]ray-sub chain-test-run ' && { echo "already running"; exit 1; }
 	avail=$(free -k | awk 'NR==2{print $NF}')
 	[ "${avail:-0}" -ge 14000 ] || { echo "not enough free memory (${avail} KB, need 14000 KB); try again in a moment"; exit 1; }
@@ -234,22 +433,10 @@ apply)
 	if [ "$(cfg enabled)" = 1 ]; then /etc/init.d/xray restart; else /etc/init.d/xray stop; fi
 	echo applied
 	;;
-bench-start)
-	avail=$(free -k | awk 'NR==2{print $NF}')
-	# one extra xr needs about 19 MB (the process is first in line for the OOM killer, so the proxy itself is safe) (18 MB Go heap limit + unpacked image); the proxy itself is protected from the OOM killer
-	[ "${avail:-0}" -ge 14000 ] || { echo "not enough free memory (${avail} KB, need 14000 KB); try again in a moment"; exit 1; }
-	ps | grep -q '[x]ray-sub bench ' && { echo "already running"; exit 1; }
-	echo "0 0" > /tmp/bench.progress
-	( /usr/bin/xray-sub bench "${2:-.}" >/tmp/bench.log 2>&1 </dev/null & )
-	echo started
-	;;
-bench-state)
-	if ps | grep -q '[x]ray-sub bench '; then echo running; else echo idle; fi
-	echo "P $(cat /tmp/bench.progress 2>/dev/null || echo '0 0')"
-	[ -s /tmp/bench.txt ] && sort -rn /tmp/bench.txt
-	;;
 status)
 	echo "enabled : $(cfg enabled)   node: $(cfg node_name)/$(cfg node)   clients: $(cfg clients)"
+	echo "health  : $(cat $HD/last 2>/dev/null || echo unknown) fails=$(cat $HD/fails 2>/dev/null || echo 0)"
+	echo "proxied : $(cat /tmp/netmon/flow.px 2>/dev/null || echo '0 0')"
 	# the chain address holds credentials: show only scheme://host:port
 	ch=$(cfg chain)
 	if [ -z "$ch" ]; then echo "chain   : none"
@@ -259,6 +446,6 @@ status)
 	ensure_cache; echo "sub     : $(wc -l < "$LC" 2>/dev/null || echo 0) nodes"
 	;;
 *)
-	echo "usage: xray-sub update | list | get | set K V | apply | rules on|off | bench [re] | bench-start | bench-state | status | watchdog"
+	echo "usage: xray-sub update | auto-update | list | exc-list | exc-add <proxy|direct> <x> | exc-del <x> | exc-apply | domains-refresh | get | set K V | apply | rules on|off | health | probe | pick-next | switch-next | chain-test-start | status | watchdog"
 	;;
 esac

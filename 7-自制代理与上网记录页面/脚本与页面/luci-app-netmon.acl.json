@@ -1,7 +1,7 @@
 {
 	"luci-app-netmon": {
 		"description": "View which sites devices look up (DNS log)",
-		"read":  { "file": { "/usr/bin/netmon": [ "exec" ] } },
-		"write": { "file": { "/usr/bin/netmon": [ "exec" ] } }
+		"read":  { "file": { "/usr/bin/netmon": [ "exec" ], "/usr/bin/xray-sub": [ "exec" ] } },
+		"write": { "file": { "/usr/bin/netmon": [ "exec" ], "/usr/bin/xray-sub": [ "exec" ] } }
 	}
 }

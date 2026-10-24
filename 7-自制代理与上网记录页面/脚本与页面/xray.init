@@ -10,6 +10,14 @@ start_service() {
 	local port node name chain
 	port=$(uci -q get xray.main.port); node=$(uci -q get xray.main.node); name=$(uci -q get xray.main.node_name)
 	chain=$(uci -q get xray.main.chain)
+	# a name that matches no node would make xr exit and leave the proxy down: take another node of the same source instead
+	if [ -n "$name" ] && ! /usr/bin/xray-sub list | cut -f2 | grep -qE -- "$name"; then
+		alt=$(/usr/bin/xray-sub pick-next)
+		if [ -n "$alt" ]; then
+			logger -t xray "node pattern '$name' matches nothing, using '$alt'"
+			/usr/bin/xray-sub use-node "$alt" >/dev/null; name=$(uci -q get xray.main.node_name)
+		fi
+	fi
 	procd_open_instance
 	if [ -n "$name" ]; then
 		procd_set_param command /usr/bin/xr -sub /etc/xray/sub.txt -name "$name" -port "${port:-7892}"
