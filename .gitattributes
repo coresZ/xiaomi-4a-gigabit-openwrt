@@ -1,0 +1,3 @@
+# Keep every byte exactly as it is: no line-ending conversion.
+# The router scripts must stay LF, the .bat must stay CRLF, and SHA256SUMS.txt has to keep matching.
+* -text

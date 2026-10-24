@@ -1,0 +1,264 @@
+#!/bin/sh
+# xray-sub: VLESS subscription + transparent proxy helper
+D=/etc/xray
+cfg() { uci -q get xray.main.$1; }
+mainpid() { ps | grep "[x]r -sub" | grep -v -- "-port 7893" | awk '{print $1}' | head -1; }
+# when memory runs out the kernel must sacrifice a benchmark instance, never the proxy that devices use
+protect() { MP=$(mainpid); [ -n "$MP" ] && echo -800 > /proc/$MP/oom_score_adj 2>/dev/null; }
+rules_off() { nft delete table ip xray 2>/dev/null; nft delete table ip6 xray6 2>/dev/null; }
+
+# The node list and statistics only depend on sub.txt, but computing them means starting xr, which has to unpack
+# ~15 MB in RAM (slow, and several at once exhaust memory). So compute once, cache in /tmp, and let only one run at a time.
+LC=/tmp/xray.list; SC=/tmp/xray.stats; LK=/tmp/xray.lock
+cache_ok() { [ -s "$LC" ] && [ -s "$SC" ] && [ "$LC" -nt "$D/sub.txt" ]; }
+ensure_cache() {
+	cache_ok && return 0
+	[ -s "$D/sub.txt" ] || return 1
+	w=0
+	while [ $w -lt 40 ]; do
+		if mkdir "$LK" 2>/dev/null; then
+			/usr/bin/xr -sub "$D/sub.txt" -list > "$LC.tmp" 2>/dev/null && /usr/bin/xr -sub "$D/sub.txt" -stats > "$SC.tmp" 2>/dev/null \
+				&& mv "$SC.tmp" "$SC" && mv "$LC.tmp" "$LC"
+			rmdir "$LK" 2>/dev/null
+			return 0
+		fi
+		cache_ok && return 0
+		sleep 1; w=$((w+1))
+	done
+	rmdir "$LK" 2>/dev/null   # a stuck lock: clear it so the next call can try again
+	return 1
+}
+case "$1" in
+update)
+	URL=$(cfg sub_url); [ -n "$URL" ] || { echo "xray.main.sub_url is not set"; exit 1; }
+	wget -q -T 20 -U 'v2rayN/6.0' -O /tmp/sub.new "$URL" || { echo "download failed"; rm -f /tmp/sub.new; exit 1; }
+	n=$(/usr/bin/xr -sub /tmp/sub.new -list 2>/dev/null | wc -l)
+	[ "$n" -ge 1 ] || { echo "no vless nodes found, keeping the old list"; rm -f /tmp/sub.new; exit 1; }
+	mv /tmp/sub.new $D/sub.txt; chmod 600 $D/sub.txt; rm -f /tmp/bench.txt; echo "$n nodes"
+	# rebuild the cached list/statistics now, while nobody is waiting for the page
+	rm -f "$LC" "$SC"; ensure_cache
+	;;
+list)
+	ensure_cache; cat "$LC" 2>/dev/null
+	;;
+stats)
+	# what the subscription contains and what was left out
+	ensure_cache; cat "$SC" 2>/dev/null
+	;;
+rules)
+	case "$2" in
+	on)
+		[ -n "$(mainpid)" ] || { echo "xr is not running"; exit 1; }
+		protect
+		clients=$(cfg clients); port=$(cfg port)
+		# clients = "all", "none", or a list of device MACs (aa:bb:..) and/or IPs, separated by spaces
+		ips=""; macs=""
+		for t in $clients; do
+			case "$t" in
+			all|none) ;;
+			*:*) echo "$t" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' && macs="$macs,$(echo $t | tr A-F a-f)" ;;
+			*) echo "$t" | grep -qE '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' && ips="$ips,$t" ;;
+			esac
+		done
+		ips=${ips#,}; macs=${macs#,}
+		CL=""; CL6=""
+		if [ "$clients" = none ]; then
+			CL="return"; CL6="return"
+		elif [ -n "$ips" ] || [ -n "$macs" ]; then
+			[ -n "$ips" ] && CL="ip saddr != { $ips }"
+			[ -n "$macs" ] && CL="$CL ether saddr != { $macs }"
+			CL="$CL return"; CL6="return"
+		elif [ -n "$clients" ] && [ "$clients" != all ]; then
+			# nothing in the list was understood: proxy nobody rather than everybody
+			CL="return"; CL6="return"
+		fi
+		sed -e "s/@PORT@/${port:-7892}/" -e "s#@CLIENT@#$CL#" -e "s#@CLIENT6@#$CL6#" $D/xray.nft > /tmp/xray.rules.nft
+		nft -f /tmp/xray.rules.nft && echo "rules on (clients: ${clients:-all})"
+		rm -f /tmp/xray.rules.nft
+		;;
+	off) rules_off; echo "rules off" ;;
+	esac
+	;;
+watchdog)
+	[ "$(cfg enabled)" = 1 ] || exit 0
+	if [ -n "$(mainpid)" ]; then
+		protect
+		# Only look at ONE small chain: "nft list table" dumps the 5500-entry China IP set (6 MB of RAM, a lot of CPU),
+		# and when memory is short that command gets killed - which used to make this check reload the whole ruleset every minute.
+		if ! nft list chain ip xray pre >/dev/null 2>&1; then
+			sleep 2
+			nft list chain ip xray pre >/dev/null 2>&1 || "$0" rules on >/dev/null
+		fi
+	else
+		rules_off
+	fi
+	;;
+restart)
+	if [ "$(cfg enabled)" = 1 ]; then /etc/init.d/xray restart >/dev/null 2>&1; echo restarted; else echo "proxy is switched off"; fi
+	;;
+devices)
+	# ip <TAB> name <TAB> mac <TAB> online(1/0): Wi-Fi association list + neighbour table + DHCP leases
+	: > /tmp/xray.wifi
+	for w in $(iwinfo 2>/dev/null | awk '/ESSID/ {print $1}'); do
+		iwinfo $w assoclist 2>/dev/null | awk 'tolower($1) ~ /^[0-9a-f][0-9a-f]:/ {print tolower($1)}' >> /tmp/xray.wifi
+	done
+	ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" && $NF != "FAILED" && $NF != "INCOMPLETE" { print $1 "\t" tolower($3) "\t" $NF }' > /tmp/xray.neigh
+	awk '
+		FILENAME == ARGV[1] { wifi[$1] = 1; next }
+		FILENAME == ARGV[2] { split($0, a, "\t"); nmac[a[1]] = a[2]; nst[a[1]] = a[3]; next }
+		{
+			ip = $3; mac = tolower($2); name = ($4 == "*" || $4 == "") ? "-" : $4; seen[ip] = 1
+			on = (mac in wifi) || (ip in nst && nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
+			print ip "\t" name "\t" mac "\t" (on ? 1 : 0)
+		}
+		END {
+			for (ip in nmac) if (!(ip in seen)) {
+				on = (nmac[ip] in wifi) || (nst[ip] ~ /REACHABLE|DELAY|PROBE|PERMANENT/)
+				print ip "\t-\t" nmac[ip] "\t" (on ? 1 : 0)
+			}
+		}' /tmp/xray.wifi /tmp/xray.neigh /tmp/dhcp.leases 2>/dev/null | sort -t. -k4 -n
+	rm -f /tmp/xray.wifi /tmp/xray.neigh
+	;;
+bench)
+	# xray-sub bench [regex]  - download a few MB through each node, print a ranking
+	re="${2:-.}"; TP=7893; OUT=/tmp/bench.txt
+	nft delete table ip xbench 2>/dev/null
+	nft add table ip xbench
+	nft add chain ip xbench out '{ type nat hook output priority -100 ; }'
+	# only port 80 is intercepted: WS nodes sit behind Cloudflare and are dialed on 443, so they must not be caught by this rule
+	nft add rule ip xbench out ip daddr { 162.159.0.0/16, 104.16.0.0/12, 172.64.0.0/13, 141.101.64.0/18, 108.162.192.0/18 } tcp dport 80 redirect to :$TP
+	# "3,5,9" = exactly these node numbers; anything else is a regular expression on the node list
+	case "$re" in
+	*[!0-9,]*|"") ;;
+	*) re="^($(echo "$re" | tr ',' '|'))$(printf '\t')" ;;
+	esac
+	ensure_cache; grep -E "$re" "$LC" > /tmp/bench.list
+	# keep earlier results of nodes that are NOT part of this run
+	cut -f1 /tmp/bench.list > /tmp/bench.idx
+	: > $OUT.keep
+	[ -s $OUT ] && while IFS= read -r l; do
+		i=$(echo "$l" | sed -n 's/.*#\([0-9][0-9]*\) .*/\1/p')
+		grep -qx "$i" /tmp/bench.idx || echo "$l" >> $OUT.keep
+	done < $OUT
+	mv $OUT.keep $OUT
+	total=$(wc -l < /tmp/bench.list); done_n=0; PROG=/tmp/bench.progress
+	echo "0 $total" > $PROG
+	while IFS="$(printf '\t')" read i name kind; do
+		echo "$done_n $total $name" > $PROG
+		GOGC=50 GOMEMLIMIT=18MiB /usr/bin/xr -sub $D/sub.txt -n $i -port $TP >/dev/null 2>&1 </dev/null &
+		P=$!; w=0
+		echo 1000 > /proc/$P/oom_score_adj 2>/dev/null
+		while [ $w -lt 10 ] && ! netstat -ltn 2>/dev/null | grep -q ":$TP "; do sleep 1; w=$((w+1)); done
+		t0=$(cut -d' ' -f1 /proc/uptime)
+		# no "timeout" applet and no fractional sleep here: wait() for wget, a watchdog kills it after 15 s
+		rm -f /tmp/bench.dl
+		wget -4 -qO /tmp/bench.dl -T 8 "http://speed.cloudflare.com/__down?bytes=3000000" >/dev/null 2>&1 </dev/null &
+		WP=$!
+		( sleep 15; kill -9 $WP 2>/dev/null ) >/dev/null 2>&1 &
+		KP=$!
+		wait $WP 2>/dev/null
+		t1=$(cut -d' ' -f1 /proc/uptime)
+		kill $KP 2>/dev/null
+		b=0; [ -f /tmp/bench.dl ] && b=$(wc -c < /tmp/bench.dl); rm -f /tmp/bench.dl
+		alive=0; kill -0 $P 2>/dev/null && alive=1
+		kill -9 $P 2>/dev/null; wait $P 2>/dev/null
+		w=0; while [ $w -lt 5 ] && netstat -ltn 2>/dev/null | grep -q ":$TP "; do sleep 1; w=$((w+1)); done
+		# the test instance died during the run (killed for lack of memory): that says nothing about the node, so do not record a result
+		if [ $alive = 0 ]; then echo "#$i $name: test instance was killed (low memory), skipped" >> /tmp/bench.log; done_n=$((done_n+1)); continue; fi
+		echo "$i	$name	$b	$t0	$t1" | awk -F'\t' '{d=$5-$4; if(d<0.05)d=0.05; printf "%6.2f Mbps  %5.1fs  %4.1f/3MB  #%s %s\n", $3*8/1000000/d, d, $3/1000000, $1, $2}' >> $OUT
+		done_n=$((done_n+1))
+	done < /tmp/bench.list
+	echo "$total $total" > $PROG
+	nft delete table ip xbench 2>/dev/null
+	sort -rn $OUT
+	rm -f /tmp/bench.list /tmp/bench.idx
+	;;
+get)
+	for k in enabled node_name node clients sub_url port chain; do echo "$k=$(cfg $k)"; done
+	;;
+set)
+	case "$2" in enabled|node_name|node|clients|sub_url|port|chain) ;; *) echo "bad key"; exit 1 ;; esac
+	case "$3" in *"
+"*) echo "bad value"; exit 1 ;; esac
+	# a chain address is checked before it is stored: a bad one would stop the proxy from starting
+	if [ "$2" = chain ] && [ -n "$3" ]; then
+		err=$(/usr/bin/xr -check-chain "$3" 2>&1) || { echo "$err"; exit 1; }
+	fi
+	uci set "xray.main.$2=$3" && uci commit xray && echo ok
+	;;
+chain-test-start)
+	# xray-sub chain-test-start [address] : use the selected node as the front hop and report where traffic leaves
+	[ -n "${2:-$(cfg chain)}" ] || { echo "no chain address set"; exit 1; }
+	err=$(/usr/bin/xr -check-chain "${2:-$(cfg chain)}" 2>&1) || { echo "$err"; exit 1; }
+	ps | grep -q '[x]ray-sub bench ' && { echo "a speed test is running, try again in a moment"; exit 1; }
+	ps | grep -q '[x]ray-sub chain-test-run ' && { echo "already running"; exit 1; }
+	avail=$(free -k | awk 'NR==2{print $NF}')
+	[ "${avail:-0}" -ge 14000 ] || { echo "not enough free memory (${avail} KB, need 14000 KB); try again in a moment"; exit 1; }
+	: > /tmp/chain-test.out
+	( /usr/bin/xray-sub chain-test-run "${2:-$(cfg chain)}" >>/tmp/chain-test.out 2>&1 </dev/null & )
+	echo started
+	;;
+chain-test-run)
+	TP=7893; url="$2"; name=$(cfg node_name); node=$(cfg node)
+	ipapi=$(nslookup ip-api.com 127.0.0.1 2>/dev/null | sed -n '/^Name/,$p' | grep -oE '([0-9]{1,3}[.]){3}[0-9]{1,3}' | head -1)
+	nft delete table ip xchain 2>/dev/null
+	nft add table ip xchain
+	nft add chain ip xchain out '{ type nat hook output priority -100 ; }'
+	nft add rule ip xchain out ip daddr { 162.159.0.0/16, 104.16.0.0/12, 172.64.0.0/13, 141.101.64.0/18, 108.162.192.0/18, ${ipapi:-203.0.113.1} } tcp dport 80 redirect to :$TP
+	if [ -n "$name" ]; then
+		GOGC=50 GOMEMLIMIT=18MiB /usr/bin/xr -sub $D/sub.txt -name "$name" -port $TP -chain "$url" >/dev/null 2>&1 </dev/null &
+	else
+		GOGC=50 GOMEMLIMIT=18MiB /usr/bin/xr -sub $D/sub.txt -n "${node:-1}" -port $TP -chain "$url" >/dev/null 2>&1 </dev/null &
+	fi
+	P=$!; echo 1000 > /proc/$P/oom_score_adj 2>/dev/null; w=0
+	while [ $w -lt 10 ] && ! netstat -ltn 2>/dev/null | grep -q ":$TP "; do sleep 1; w=$((w+1)); done
+	for what in trace info; do
+		rm -f /tmp/chain.dl
+		if [ $what = trace ]; then u="http://speed.cloudflare.com/cdn-cgi/trace"; else u="http://ip-api.com/json/?fields=status,country,regionName,city,isp,org,hosting,mobile,proxy,query"; fi
+		wget -4 -qO /tmp/chain.dl -T 12 "$u" >/dev/null 2>&1 </dev/null &
+		WP=$!; ( sleep 18; kill -9 $WP 2>/dev/null ) >/dev/null 2>&1 &
+		KP=$!; wait $WP 2>/dev/null; kill $KP 2>/dev/null
+		if [ $what = trace ]; then echo "trace=$(grep -E '^(loc|colo)=' /tmp/chain.dl 2>/dev/null | tr '\n' ' ')"; else echo "info=$(cat /tmp/chain.dl 2>/dev/null | tr -d '\n')"; fi
+	done
+	alive=0; kill -0 $P 2>/dev/null && alive=1
+	[ $alive = 1 ] || echo "error=the test process was killed for lack of memory, try again in a moment"
+	kill -9 $P 2>/dev/null; wait $P 2>/dev/null
+	nft delete table ip xchain 2>/dev/null; rm -f /tmp/chain.dl
+	echo done=1
+	;;
+chain-test-state)
+	if ps | grep -q '[x]ray-sub chain-test-run '; then echo running; else echo idle; fi
+	cat /tmp/chain-test.out 2>/dev/null
+	;;
+apply)
+	if [ "$(cfg enabled)" = 1 ]; then /etc/init.d/xray restart; else /etc/init.d/xray stop; fi
+	echo applied
+	;;
+bench-start)
+	avail=$(free -k | awk 'NR==2{print $NF}')
+	# one extra xr needs about 19 MB (the process is first in line for the OOM killer, so the proxy itself is safe) (18 MB Go heap limit + unpacked image); the proxy itself is protected from the OOM killer
+	[ "${avail:-0}" -ge 14000 ] || { echo "not enough free memory (${avail} KB, need 14000 KB); try again in a moment"; exit 1; }
+	ps | grep -q '[x]ray-sub bench ' && { echo "already running"; exit 1; }
+	echo "0 0" > /tmp/bench.progress
+	( /usr/bin/xray-sub bench "${2:-.}" >/tmp/bench.log 2>&1 </dev/null & )
+	echo started
+	;;
+bench-state)
+	if ps | grep -q '[x]ray-sub bench '; then echo running; else echo idle; fi
+	echo "P $(cat /tmp/bench.progress 2>/dev/null || echo '0 0')"
+	[ -s /tmp/bench.txt ] && sort -rn /tmp/bench.txt
+	;;
+status)
+	echo "enabled : $(cfg enabled)   node: $(cfg node_name)/$(cfg node)   clients: $(cfg clients)"
+	# the chain address holds credentials: show only scheme://host:port
+	ch=$(cfg chain)
+	if [ -z "$ch" ]; then echo "chain   : none"
+	else case "$ch" in *@*) echo "chain   : ${ch%%://*}://$(echo "${ch##*@}" | cut -d'?' -f1 | cut -d'#' -f1 | cut -d/ -f1)" ;; *) echo "chain   : ${ch%%://*}://(hidden)" ;; esac; fi
+	MP=$(mainpid); if [ -n "$MP" ]; then echo "xr      : running, $(grep VmRSS /proc/$MP/status | tr -s '	 ' ' ' | cut -d' ' -f2) kB RSS"; else echo "xr      : stopped"; fi
+	nft list chain ip xray pre >/dev/null 2>&1 && echo "rules   : on" || echo "rules   : off"
+	ensure_cache; echo "sub     : $(wc -l < "$LC" 2>/dev/null || echo 0) nodes"
+	;;
+*)
+	echo "usage: xray-sub update | list | get | set K V | apply | rules on|off | bench [re] | bench-start | bench-state | status | watchdog"
+	;;
+esac

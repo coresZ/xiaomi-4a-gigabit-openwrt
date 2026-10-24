@@ -1,0 +1,101 @@
+#!/bin/sh
+# netmon: who looked up which site (DNS query log, per device). Data lives in RAM only.
+D=/tmp/netmon
+EV=$D/events.tsv
+RAW=/tmp/dnsmasq-queries.log
+MAX=30000
+mkdir -p $D
+
+enabled() { [ "$(uci -q get netmon.main.enabled)" = 1 ]; }
+routerip() { uci -q get network.lan.ipaddr | cut -d/ -f1; }
+
+case "$1" in
+collect)
+	enabled || exit 0
+	[ -s $RAW ] || exit 0
+	# never let the raw log grow without bound
+	[ "$(wc -c < $RAW)" -gt 5000000 ] && : > $RAW
+	cp $RAW $D/raw.tmp && : > $RAW
+	now=$(date +%s)
+	rip=$(routerip)
+	# line (log-queries=extra): "Oct 23 23:40:01 dnsmasq[1]: 76 192.168.10.5/50598 query[A] www.example.com from 192.168.10.5"
+	awk -v now="$now" -v rip="$rip" '
+		{
+			for (i = 1; i <= NF; i++) if ($i == "query[A]") break
+			if (i > NF || $(i + 2) != "from") next
+			dom = tolower($(i + 1)); ip = $(i + 3)
+			if (ip == rip || ip == "127.0.0.1" || ip == "::1") next
+			if (dom ~ /\.(lan|arpa|local|localdomain)$/ || dom !~ /\./) next
+			k = ip SUBSEP dom
+			if (!(k in seen)) { seen[k] = 1; print now "\t" ip "\t" dom }
+		}' $D/raw.tmp >> $EV
+	rm -f $D/raw.tmp
+	n=$(wc -l < $EV)
+	[ "$n" -gt "$MAX" ] && { tail -n $MAX $EV > $EV.new && mv $EV.new $EV; }
+	;;
+devices)
+	# ip <TAB> name <TAB> mac <TAB> lookups in the last hour
+	cut=$(( $(date +%s) - 3600 ))
+	[ -f $EV ] || : > $EV
+	awk -F'\t' -v cut="$cut" '$1 >= cut { c[$2]++ } END { for (i in c) print i "\t" c[i] }' $EV > $D/cnt.tmp
+	# dhcp.leases is space separated: expiry mac ip hostname clientid
+	awk '
+		FILENAME == ARGV[1] { split($0, a, "\t"); c[a[1]] = a[2]; next }
+		{ name = ($4 == "*" || $4 == "") ? "-" : $4; seen[$3] = 1; print $3 "\t" name "\t" $2 "\t" (c[$3] + 0) }
+		END { for (i in c) if (!(i in seen)) print i "\t-\t-\t" c[i] }
+	' $D/cnt.tmp /tmp/dhcp.leases 2>/dev/null | sort -t. -k4 -n
+	rm -f $D/cnt.tmp
+	;;
+recent)
+	# netmon recent [count] [ip]  -> newest first: epoch <TAB> ip <TAB> domain
+	n="${2:-200}"; ip="${3:-all}"
+	[ -s $EV ] || exit 0
+	awk -F'\t' -v ip="$ip" 'ip == "all" || $2 == ip' $EV | tail -n "$n" | awk '{a[NR] = $0} END {for (i = NR; i >= 1; i--) print a[i]}'
+	;;
+top)
+	# netmon top [ip|all] [seconds, 0 = everything] [limit] -> count <TAB> last seen <TAB> domain
+	ip="${2:-all}"; secs="${3:-3600}"; lim="${4:-100}"
+	[ -s $EV ] || exit 0
+	cut=0; [ "$secs" -gt 0 ] && cut=$(( $(date +%s) - secs ))
+	awk -F'\t' -v cut="$cut" -v ip="$ip" '
+		$1 >= cut && (ip == "all" || $2 == ip) { c[$3]++; if ($1 > l[$3]) l[$3] = $1 }
+		END { for (d in c) print c[d] "\t" l[d] "\t" d }' $EV | sort -rn | head -n "$lim"
+	;;
+stats)
+	echo "enabled=$(uci -q get netmon.main.enabled)"
+	echo "events=$( [ -f $EV ] && wc -l < $EV || echo 0 )"
+	echo "bytes=$( [ -f $EV ] && wc -c < $EV || echo 0 )"
+	echo "oldest=$( [ -s $EV ] && head -n 1 $EV | cut -f1 || echo 0 )"
+	echo "now=$(date +%s)"
+	echo "logging=$( [ "$(uci -q get dhcp.@dnsmasq[0].logqueries)" = 1 ] && echo 1 || echo 0 )"
+	;;
+on)
+	uci -q get netmon.main >/dev/null || { touch /etc/config/netmon; uci set netmon.main=netmon; }
+	uci set netmon.main.enabled=1; uci commit netmon
+	uci set dhcp.@dnsmasq[0].logqueries=1
+	uci set dhcp.@dnsmasq[0].logfacility=$RAW
+	uci commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	grep -q 'netmon collect' /etc/crontabs/root 2>/dev/null || echo '* * * * * /usr/bin/netmon collect >/dev/null 2>&1' >> /etc/crontabs/root
+	/etc/init.d/cron restart >/dev/null 2>&1
+	echo on
+	;;
+off)
+	uci -q get netmon.main >/dev/null && { uci set netmon.main.enabled=0; uci commit netmon; }
+	uci set dhcp.@dnsmasq[0].logqueries=0
+	uci -q delete dhcp.@dnsmasq[0].logfacility
+	uci commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	rm -f $RAW
+	echo off
+	;;
+clear)
+	: > $EV; rm -f $D/raw.tmp
+	# truncate, never delete: dnsmasq keeps the file open and would keep writing to a deleted inode
+	[ -f $RAW ] && : > $RAW
+	echo cleared
+	;;
+*)
+	echo "usage: netmon on | off | clear | collect | stats | devices | recent [n] [ip] | top [ip] [secs] [limit]"
+	;;
+esac

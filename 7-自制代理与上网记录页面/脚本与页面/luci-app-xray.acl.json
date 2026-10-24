@@ -1,0 +1,7 @@
+{
+	"luci-app-xray": {
+		"description": "Manage the VLESS transparent proxy",
+		"read":  { "file": { "/usr/bin/xray-sub": [ "exec" ] } },
+		"write": { "file": { "/usr/bin/xray-sub": [ "exec" ] } }
+	}
+}
