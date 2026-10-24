@@ -27,6 +27,7 @@ import (
 	xhttp "github.com/xtls/xray-core/proxy/http"
 	"github.com/xtls/xray-core/proxy/shadowsocks"
 	"github.com/xtls/xray-core/proxy/socks"
+	"github.com/xtls/xray-core/proxy/trojan"
 	"github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vless/outbound"
 	"github.com/xtls/xray-core/transport/internet"
@@ -47,7 +48,9 @@ import (
 
 type node struct {
 	name, host, id, flow, typ, sec, sni, fp, pbk, sid, wsHost, path string
+	proto, method                                                     string // "vless" (default), "ss" or "trojan"; id is the password for ss / trojan
 	port                                                              int
+	insecure bool // allowInsecure=1 in the link (self-signed certificate): skip certificate verification
 }
 
 // Provider "info" entries ("剩余流量：23 TB", "套餐到期：长期有效", ...) are fake nodes. They always carry a colon,
@@ -59,7 +62,7 @@ func isInfo(name string) bool {
 }
 
 type stats struct {
-	total, vless, kept, info int
+	total, vless, ss, trojan, kept, info int
 	other, badTransport      map[string]int
 }
 
@@ -86,8 +89,24 @@ func parseAll(raw []byte) ([]node, stats) {
 		if i <= 0 {
 			continue
 		}
-		st.total++
-		if l[:i] != "vless" {
+			st.total++
+		switch l[:i] {
+		case "ss":
+			st.ss++
+			if n, ok := parseSSNode(l, &st); ok {
+				out = append(out, n)
+				st.kept++
+			}
+			continue
+		case "trojan":
+			st.trojan++
+			if n, ok := parseTrojanNode(l, &st); ok {
+				out = append(out, n)
+				st.kept++
+			}
+			continue
+		case "vless":
+		default:
 			st.other[l[:i]]++
 			continue
 		}
@@ -118,6 +137,74 @@ func parseAll(raw []byte) ([]node, stats) {
 	return out, st
 }
 
+// ss://base64(method:password)@host:port#name  (also the older all-base64 form). Nodes that need a plugin (obfs, v2ray-plugin)
+// cannot work without it and are counted, not listed.
+func parseSSNode(l string, st *stats) (node, bool) {
+	body := l[len("ss://"):]
+	name := ""
+	if h := strings.Index(body, "#"); h >= 0 {
+		name, _ = url.PathUnescape(body[h+1:])
+		body = body[:h]
+	}
+	if q := strings.Index(body, "?"); q >= 0 {
+		if strings.Contains(body[q:], "plugin=") {
+			st.badTransport["ss-plugin"]++
+			return node{}, false
+		}
+		body = body[:q]
+	}
+	c, err := parseSS(&chainSpec{}, strings.TrimRight(body, "/"))
+	if err != nil || isInfo(name) || name == "" {
+		if err == nil && isInfo(name) {
+			st.info++
+		}
+		return node{}, false
+	}
+	if _, ok := ssCipher[strings.ToLower(c.method)]; !ok {
+		st.badTransport["ss-"+strings.ToLower(c.method)]++
+		return node{}, false
+	}
+	return node{name: name, host: c.host, port: c.port, id: c.pass, method: strings.ToLower(c.method), proto: "ss", typ: "ss", sec: "none"}, true
+}
+
+// trojan://password@host:port?security=tls&sni=..&type=tcp|ws&host=..&path=..#name
+func parseTrojanNode(l string, st *stats) (node, bool) {
+	u, err := url.Parse(l)
+	if err != nil || u.User == nil {
+		return node{}, false
+	}
+	p, _ := strconv.Atoi(u.Port())
+	q := u.Query()
+	ai := q.Get("allowInsecure")
+	n := node{name: u.Fragment, host: u.Hostname(), port: p, id: u.User.Username(), proto: "trojan", insecure: ai == "1" || ai == "true",
+		typ: q.Get("type"), sec: q.Get("security"), sni: q.Get("sni"), fp: q.Get("fp"), wsHost: q.Get("host"), path: q.Get("path")}
+	if n.sni == "" {
+		n.sni = q.Get("peer")
+	}
+	if n.sec == "" {
+		n.sec = "tls"
+	}
+	if isInfo(n.name) {
+		st.info++
+		return node{}, false
+	}
+	if n.name == "" || n.port == 0 || n.id == "" {
+		return node{}, false
+	}
+	if n.typ != "" && n.typ != "tcp" && n.typ != "ws" {
+		st.badTransport["trojan-"+n.typ]++
+		return node{}, false
+	}
+	if n.typ == "" {
+		n.typ = "tcp"
+	}
+	if n.sec != "tls" {
+		st.badTransport["trojan-"+n.sec]++
+		return node{}, false
+	}
+	return n, true
+}
+
 func parse(raw []byte) []node {
 	n, _ := parseAll(raw)
 	return n
@@ -126,13 +213,25 @@ func parse(raw []byte) []node {
 // outbound builds the VLESS outbound for this node. dialer, when set, is the tag of another outbound that this
 // connection must be dialed through (that is how a chain works: the exit is dialed via the front node).
 func (n node) outbound(tag, dialer string) (*core.OutboundHandlerConfig, error) {
-	u, err := uuid.ParseString(n.id)
-	if err != nil {
-		return nil, err
-	}
 	sc := &internet.StreamConfig{ProtocolName: "tcp"}
 	if dialer != "" {
 		sc.SocketSettings = &internet.SocketConfig{DialerProxy: dialer}
+	}
+	ep := &protocol.ServerEndpoint{Address: net.NewIPOrDomain(net.ParseAddress(n.host)), Port: uint32(n.port)}
+	if n.proto == "ss" {
+		ep.User = &protocol.User{Account: serial.ToTypedMessage(&shadowsocks.Account{Password: n.id, CipherType: ssCipher[n.method]})}
+		return &core.OutboundHandlerConfig{
+			Tag:            tag,
+			SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{StreamSettings: sc}),
+			ProxySettings:  serial.ToTypedMessage(&shadowsocks.ClientConfig{Server: ep}),
+		}, nil
+	}
+	var u uuid.UUID
+	if n.proto != "trojan" {
+		var err error
+		if u, err = uuid.ParseString(n.id); err != nil {
+			return nil, err
+		}
 	}
 	sni := n.sni
 	if sni == "" {
@@ -171,6 +270,14 @@ func (n node) outbound(tag, dialer string) (*core.OutboundHandlerConfig, error) 
 	case "tls":
 		sc.SecurityType = serial.GetMessageType(&tls.Config{})
 		sc.SecuritySettings = []*serial.TypedMessage{serial.ToTypedMessage(&tls.Config{ServerName: sni, Fingerprint: fp})}
+	}
+	if n.proto == "trojan" {
+		ep.User = &protocol.User{Account: serial.ToTypedMessage(&trojan.Account{Password: n.id})}
+		return &core.OutboundHandlerConfig{
+			Tag:            tag,
+			SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{StreamSettings: sc}),
+			ProxySettings:  serial.ToTypedMessage(&trojan.ClientConfig{Server: ep}),
+		}, nil
 	}
 	return &core.OutboundHandlerConfig{
 		Tag:            tag,
@@ -329,6 +436,7 @@ func (c *chainSpec) outbound(dialer string) (*core.OutboundHandlerConfig, error)
 
 // build assembles the whole config. socksPort > 0 is a debugging aid: a local socks inbound on 127.0.0.1 instead of the redirect inbound.
 func build(n node, port uint32, chain *chainSpec, socksPort uint32, noFront bool) (*core.Config, error) {
+	tls.SkipVerifyAll = n.insecure
 	front, err := n.outbound("proxy", "")
 	if err != nil {
 		return nil, err
@@ -431,7 +539,7 @@ func main() {
 	}
 	nodes, st := parseAll(raw)
 	if *showStats {
-		fmt.Printf("total=%d\nvless=%d\nkept=%d\ninfo=%d\n", st.total, st.vless, st.kept, st.info)
+		fmt.Printf("total=%d\nvless=%d\nss=%d\ntrojan=%d\nkept=%d\ninfo=%d\n", st.total, st.vless, st.ss, st.trojan, st.kept, st.info)
 		kv := func(key string, m map[string]int) {
 			var parts []string
 			for k, v := range m {
@@ -446,7 +554,7 @@ func main() {
 	}
 	if *list {
 		for i, n := range nodes {
-			fmt.Printf("%d\t%s\t%s/%s\n", i+1, n.name, n.typ, n.sec)
+			fmt.Printf("%d\t%s\t%s/%s\n", i+1, n.name, map[bool]string{true: "trojan-" + n.typ, false: n.typ}[n.proto == "trojan"], n.sec)
 		}
 		return
 	}

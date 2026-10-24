@@ -42,3 +42,28 @@ index 4a3bb6d..49b7b5d 100644
  
  	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {
  		go w.callback(conn)
+diff --git a/transport/internet/tls/config.go b/transport/internet/tls/config.go
+index 71bd6ce..c51fb19 100644
+--- a/transport/internet/tls/config.go
++++ b/transport/internet/tls/config.go
+@@ -353,6 +353,10 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 	return nil // r.PinnedPeerCertSha256==nil && r.verifyPeerCertByName==nil
+ }
+ 
++// SkipVerifyAll turns certificate verification off for every TLS connection of this process. It is set only when the
++// selected node's own link says allowInsecure=1 (self-signed certificates); off otherwise.
++var SkipVerifyAll bool
++
+ type RandCarrier struct {
+ 	Config               *tls.Config
+ 	RootCAs              *x509.CertPool
+@@ -393,6 +397,9 @@ func (c *Config) GetTLSConfig(opts ...Option) *tls.Config {
+ 		VerifyPeerCertificate:  randCarrier.verifyPeerCert,
+ 	}
+ 	randCarrier.Config = config
++	if SkipVerifyAll {
++		config.InsecureSkipVerify = true
++	}
+ 	if len(c.VerifyPeerCertByName) > 0 {
+ 		config.InsecureSkipVerify = true
+ 	} else {

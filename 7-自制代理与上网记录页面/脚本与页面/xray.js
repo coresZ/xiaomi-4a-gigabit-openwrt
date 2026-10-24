@@ -214,6 +214,8 @@ function clientsText(c) {
 /* "tcp/reality", "ws/tls", "tcp/tls", "ws/none" ... */
 function badgeText(kind) {
 	var p = (kind || '').split('/'), t = p[0] || 'tcp', s = p[1] || 'none';
+	if (t === 'ss') return 'Shadowsocks';
+	if (t.indexOf('trojan') === 0) return 'Trojan' + (t === 'trojan-ws' ? ' · WS' : '') + ' + TLS';
 	if (s === 'reality') return 'Reality';
 	if (s === 'tls') return (t === 'ws' ? 'WS' : 'TCP') + ' + TLS';
 	return (t === 'ws' ? 'WS' : 'TCP') + '（无加密）';
@@ -224,7 +226,7 @@ function statsLine(txt) {
 	var s = kv(txt), n = function(k) { return parseInt(s[k], 10) || 0; };
 	if (!n('total')) return '';
 	var list = function(v) { return (v || '').split(',').filter(Boolean).map(function(x) { var p = x.split(':'); return p[0] + ' ' + p[1]; }).join('、'); };
-	var out = '订阅共 ' + n('total') + ' 条，其中 VLESS ' + n('vless') + ' 条，列出 ' + n('kept') + ' 个可用节点。';
+	var out = '订阅共 ' + n('total') + ' 条（VLESS ' + n('vless') + (n('ss') ? '、Shadowsocks ' + n('ss') : '') + (n('trojan') ? '、Trojan ' + n('trojan') : '') + '），列出 ' + n('kept') + ' 个可用节点。';
 	if (n('info')) out += '已忽略 ' + n('info') + ' 条“剩余流量 / 到期”之类的信息条目。';
 	if (s.other) out += '不支持的协议（未列出）：' + list(s.other) + '。';
 	if (s.badtransport) out += '不支持的传输方式（未列出）：' + list(s.badtransport) + '。';
@@ -835,7 +837,7 @@ return view.extend({
 		return E('div', { 'class': 'xr' }, [
 			E('style', {}, CSS),
 			E('div', { 'class': 'xr-title' }, 'VLESS 透明代理'),
-			E('p', { 'class': 'xr-sub' }, '国内 IP 直连，其余 TCP 流量走所选节点（仅 VLESS：Reality / WS+TLS，不支持 UDP）。'),
+			E('p', { 'class': 'xr-sub' }, '国内 IP 直连，其余 TCP 流量走所选节点（支持 VLESS、Shadowsocks、Trojan，不支持 UDP）。'),
 
 			E('div', { 'class': 'xr-card xr-hero' }, [ nowBox, chips, E('div', { 'class': 'xr-two' }, [ restartBtn, pullBtn ]) ]),
 

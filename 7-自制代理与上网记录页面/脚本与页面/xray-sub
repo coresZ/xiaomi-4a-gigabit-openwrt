@@ -107,10 +107,11 @@ probe_one() {
 	r=$(wget -T 6 -O /dev/null "http://$1/" 2>&1); rc=$?
 	nft delete table ip xhealth 2>/dev/null
 	[ $rc = 0 ] && return 0
-	case "$r" in *"HTTP error"*) return 0 ;; esac
+	# any answer from a website proves the path: a status error (403/500) or a redirect ("Failed to redirect") is as good as a 200
+	case "$r" in *"HTTP error"*|*"Failed to redirect"*) return 0 ;; esac
 	return 1
 }
-probe_proxy() { probe_one 1.1.1.1 "$1" || probe_one 1.0.0.1 "$1"; }
+probe_proxy() { probe_one 104.16.0.1 "$1" || probe_one 151.101.1.69 "$1"; }
 probe_wan() { ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 119.29.29.29 >/dev/null 2>&1; }
 # the node to move to: the next one of the same source (text before the first "-"), else the next one of any source
 pick_next() {
