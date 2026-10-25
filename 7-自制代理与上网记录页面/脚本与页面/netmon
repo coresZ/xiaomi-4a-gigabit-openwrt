@@ -144,7 +144,7 @@ tr_range_from() {      # range word or seconds -> start epoch (0 = since the cou
 # conntrack keeps byte counters for every flow (also for flows redirected to the local proxy: the original destination
 # stays in the entry, and the reply side comes from <router>:<proxy port>). DNS answers tell which domain a device
 # resolved to that destination IP. Sampling every 30 s and summing the growth per (device, domain) gives per-site traffic.
-FLOW_CAP=6000
+FLOW_CAP=3500
 flow_lock() {
 	w=0
 	while ! mkdir $D/flow.lock 2>/dev/null; do
@@ -158,10 +158,15 @@ flow_lock() {
 flow_sample() {
 	tr_on || return 0
 	[ -r /proc/net/nf_conntrack ] || return 0
+	# awk holds the name map in RAM; below ~8 MB free that has been killed mid-write, so skip the round
+	avail=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
+	[ "${avail:-99999}" -ge 8000 ] || return 0
 	flow_lock || return 0
-	now=$(date +%s); b10=$(( now / 600 * 600 )); keep=$(( now - 4200 ))
+	now=$(date +%s); b10=$(( now / 600 * 600 )); keep=$(( now - 2400 ))
 	base=0; [ -f $D/flow.last ] || base=1           # first sample only sets the baseline: old long-lived flows are not "new traffic"
 	for f in flow.last flow.tot flow.b10 dnsmap.tsv; do [ -f $D/$f ] || : > $D/$f; done
+	# only the newest names: the full map is ~20 000 lines and awk keeps all of it
+	tail -n 3000 $D/dnsmap.tsv > $D/flow.dns
 	{ awk '{print $3, tolower($2)}' /tmp/dhcp.leases 2>/dev/null; ip -4 neigh show dev br-lan 2>/dev/null | awk '$2 == "lladdr" { print $1, tolower($3) }'; } > $D/flow.map
 	rip=$(routerip); port=$(uci -q get xray.main.port); port=${port:-7892}
 	lan=$(echo "$rip" | cut -d. -f1-3)
@@ -199,13 +204,13 @@ flow_sample() {
 			for (k in tu) { split(k, p, SUBSEP); print p[1], p[2], tu[k] + 0, td[k] + 0, fl[k] + 0, lt[k] + 0, pb[k] + 0, (ipl[k] == "" ? "-" : ipl[k]) > (D "/flow.tot.new"); px += pb[k]; ab += tu[k] + td[k] }
 				print px + 0, ab + 0 > (D "/flow.px")
 			for (bk in bu) { split(bk, p, SUBSEP); if (p[1] + 0 >= keep) print p[1], p[2], p[3], bu[bk] + 0, bd[bk] + 0, bp[bk] + 0, bf[bk] + 0 > (D "/flow.b10.new") }
-		}' $D/flow.map $D/flow.last $D/dnsmap.tsv $D/flow.tot $D/flow.b10 $D/flow.ct
+		}' $D/flow.map $D/flow.last $D/flow.dns $D/flow.tot $D/flow.b10 $D/flow.ct
 	if [ $? = 0 ]; then mv $D/flow.last.new $D/flow.last; mv $D/flow.tot.new $D/flow.tot; mv $D/flow.b10.new $D/flow.b10; else rm -f $D/flow.last.new $D/flow.tot.new $D/flow.b10.new; fi
-	rm -f $D/flow.map $D/flow.ct
+	rm -f $D/flow.map $D/flow.ct $D/flow.dns
 	# the totals file is bounded: keep the biggest sites (sort here has no -k, so the sort key goes in front)
 	n=$(wc -l < $D/flow.tot)
 	if [ "$n" -gt $FLOW_CAP ]; then
-		awk '{print $3 + $4, $0}' $D/flow.tot | sort -rn | head -n $((FLOW_CAP - 1000)) | cut -d' ' -f2- > $D/flow.tot.new && mv $D/flow.tot.new $D/flow.tot
+		awk '{print $3 + $4, $0}' $D/flow.tot | sort -rn | head -n $((FLOW_CAP - 1500)) | cut -d' ' -f2- > $D/flow.tot.new && mv $D/flow.tot.new $D/flow.tot
 	fi
 	rm -rf $D/flow.lock
 }
@@ -281,7 +286,7 @@ collect)
 			}
 		}' $D/raw.tmp >> $EV
 	# the name map is bounded: keep the newest lines only
-	[ -f $D/dnsmap.tsv ] && [ "$(wc -l < $D/dnsmap.tsv)" -gt 20000 ] && { tail -n 14000 $D/dnsmap.tsv > $D/dnsmap.new && mv $D/dnsmap.new $D/dnsmap.tsv; }
+	[ -f $D/dnsmap.tsv ] && [ "$(wc -l < $D/dnsmap.tsv)" -gt 8000 ] && { tail -n 5000 $D/dnsmap.tsv > $D/dnsmap.new && mv $D/dnsmap.new $D/dnsmap.tsv; }
 	rm -f $D/raw.tmp
 	n=$(wc -l < $EV)
 	[ "$n" -gt "$MAX" ] && { tail -n $MAX $EV > $EV.new && mv $EV.new $EV; }

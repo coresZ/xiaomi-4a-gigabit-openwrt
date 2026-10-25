@@ -5533,6 +5533,17 @@ table ip xray {
 	}
 }
 
+# QUIC (HTTP/3) is UDP and bypasses the TCP-only proxy, so the app sees the real Chinese address.
+# Drop it for the proxied devices only: they fall back to TCP, which the rules above redirect.
+table ip xrayudp {
+	chain noquic {
+		type filter hook prerouting priority -120; policy accept;
+		iifname != "br-lan" return
+		@CLIENT@
+		meta l4proto udp udp dport 443 counter drop
+	}
+}
+
 # foreign IPv6 would bypass the proxy: refuse it so clients fall back to IPv4 at once
 table ip6 xray6 {
 	set cn6 {

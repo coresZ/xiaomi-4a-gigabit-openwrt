@@ -106,7 +106,12 @@ var CSS = [
 	'.xr-hero{padding:14px}',
 	'.xr-card{padding:10px 12px;border-radius:14px}',
 	'.xr-row:not(.xr-inline)>.xr-btn{flex:1 1 auto}',
-	'}'
+	'}',
+	'.xr-card:not(.xr-hero){background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden}',
+	'.xr-card:not(.xr-hero):before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#5b7cff,#8b5cf6)}',
+	'.xr-two .xr-btn{background:rgba(255,255,255,.24);border-color:rgba(255,255,255,.62)}',
+	'details.xr-det>summary:hover .xr-hint{opacity:1}',
+	'html.dark .xr-card{background:rgba(255,255,255,.05)}',
 ].join('\n');
 
 function sub(args) {
@@ -272,13 +277,14 @@ return view.extend({
 	handleReset: null,
 
 	load: function() {
-		return Promise.all([ sub([ 'get' ]), sub([ 'list' ]), sub([ 'status' ]), sub([ 'devices' ]), sub([ 'stats' ]), sub([ 'health' ]) ]);
+		return Promise.all([ sub([ 'get' ]), sub([ 'list' ]), sub([ 'status' ]), sub([ 'devices' ]), sub([ 'stats' ]), sub([ 'health' ]), sub([ 'chain-history' ]) ]);
 	},
 
 	render: function(d) {
 		var cfg = kv(d[0]), nodes = parseNodes(d[1]), st = parseStatus(d[2]);
 		var wantProxy = cfg.enabled === '1';
 		var health = kv(d[5] || ''), autoSw = cfg.auto_switch === '1';
+		var chainHist = (d[6] || '').split('\n').filter(Boolean);
 		var devs = parseDevices(d[3] || '');
 		var tokens = (cfg.clients || 'all').split(' ').filter(Boolean);
 		var scope = (!tokens.length || tokens[0] === 'all') ? 'all' : 'pick';
@@ -416,6 +422,16 @@ return view.extend({
 				.catch(function(e) { ui.hideModal(); note('应用失败：' + e, 'danger'); });
 		}
 
+		var quicCb = E('input', { 'type': 'checkbox', 'change': function() {
+			var on = quicCb.checked;
+			sub([ 'set', 'block_quic', on ? '1' : '0' ]).then(function(out) {
+				if ((out || '').trim() !== 'ok') { quicCb.checked = !on; note((out || '').trim(), 'danger'); return null; }
+				cfg.block_quic = on ? '1' : '0';
+				if (!st.run) { note('已保存，代理开启后生效。', 'info'); return null; }
+				return sub([ 'rules', 'on' ]).then(function() { note(on ? '已拦截 QUIC，App 会改走 TCP 再经过代理。' : '已取消拦截，UDP 443 恢复直连。', 'info'); });
+			}).catch(function(e) { quicCb.checked = !on; note('设置失败：' + e, 'danger'); });
+		} });
+		quicCb.checked = cfg.block_quic !== '0';
 		var saveMode = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() {
 			var cv = clientsValue();
 			if (!cv) { note('请至少选择一台设备；或选择“全部设备”，或把模式切到“直连”。', 'danger'); return; }
@@ -601,33 +617,67 @@ return view.extend({
 			subInfo.textContent = '上次检查：' + (fmtTime(cfg.sub_check) || '开机后还没检查') + '；订阅内容上次变化：' + (fmtTime(cfg.sub_change) || '未知') + '。只有节点本身变了才会重启代理（节点名里的延迟数字变化不算）。';
 		}
 
-		/* ------------ split routing exceptions: IPv4 addresses / blocks that always go direct or always through the proxy ------------ */
-		function toLines(v) { return (v || '').split(' ').filter(Boolean).join('\n'); }
-		var IP4 = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;   /* an address or block; anything else on a line is taken as a domain */
-		var taDirect = E('textarea', { 'class': 'xr-field xr-ta', 'rows': '4', 'spellcheck': 'false', 'placeholder': '每行一个，例如\nexample.cn\n203.0.113.0/24' });
-		var taProxy = E('textarea', { 'class': 'xr-field xr-ta', 'rows': '4', 'spellcheck': 'false', 'placeholder': '每行一个，例如\nexample.com\n198.51.100.0/24' });
-		taDirect.value = toLines((cfg.direct_domains || '') + ' ' + (cfg.direct_ips || '')); taProxy.value = toLines((cfg.proxy_domains || '') + ' ' + (cfg.proxy_ips || ''));
-		function tokens4(el) { return el.value.split(/[\s,;，；]+/).filter(Boolean); }
-		var saveSplit = E('button', { 'type': 'button', 'class': 'xr-btn pri', 'click': function() {
-			var dv = tokens4(taDirect), pv = tokens4(taProxy);
-			var isIp = function(t) { return IP4.test(t); }, notIp = function(t) { return !IP4.test(t); };
-			var parts = [ [ 'direct_ips', dv.filter(isIp) ], [ 'direct_domains', dv.filter(notIp) ], [ 'proxy_ips', pv.filter(isIp) ], [ 'proxy_domains', pv.filter(notIp) ] ];
-			saveSplit.disabled = true;
-			var chain = Promise.resolve();
-			parts.forEach(function(p) {
-				chain = chain.then(function() { return sub([ 'set', p[0], p[1].join(' ') ]); }).then(function(out) {
-					if (out.trim() !== 'ok') throw new Error((p[0].indexOf('direct') === 0 ? '“强制直连”' : '“强制走代理”') + '里有无效内容：' + out.trim().replace(/^bad value:?\s*/, ''));
-					cfg[p[0]] = p[1].join(' ');
-				});
+		/* ------------ split routing exceptions ------------ */
+		var IP4 = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+		function excItems() {
+			var out = [];
+			function add(kind, key, ip) { (cfg[key] || '').split(' ').filter(Boolean).forEach(function(v) { out.push({ kind: kind, v: v, ip: ip }); }); }
+			add('direct', 'direct_domains', false); add('direct', 'direct_ips', true);
+			add('proxy', 'proxy_domains', false); add('proxy', 'proxy_ips', true);
+			return out;
+		}
+		var excDD = dropdown(), excList = E('div', { 'class': 'xr-ddl' });
+		excDD.panel.appendChild(excList);
+		function drawExc() {
+			var items = excItems();
+			excDD.txt.textContent = items.length ? '已生效 ' + items.length + ' 条（点开查看或删除）' : '还没有例外规则';
+			while (excList.firstChild) excList.removeChild(excList.firstChild);
+			items.forEach(function(it) {
+				excList.appendChild(E('div', { 'class': 'xr-opt' }, [
+					E('span', { 'class': 't' + (it.kind === 'proxy' ? ' on' : '') }, it.kind === 'proxy' ? '走代理' : '直连'),
+					E('span', { 'class': 'n' }, it.v),
+					E('button', { 'type': 'button', 'class': 'xr-mini', 'title': '删除这条规则', 'click': function(ev) { ev.preventDefault(); ev.stopPropagation(); removeExc(it); } }, '×')
+				]));
 			});
-			chain.then(function() { return st.run ? sub([ 'exc-apply' ]) : ''; }).then(function() {
-				saveSplit.disabled = false; drawHints();
-				note('分流例外已保存' + (st.run ? '并生效（只影响之后新建的连接；域名的地址每 5 分钟补全一次）。' : '，代理开启后生效。'), 'info');
-			}).catch(function(e) { saveSplit.disabled = false; note(String(e.message || e), 'danger'); });
-		} }, '保存并生效');
+			if (!items.length) excList.appendChild(E('div', { 'class': 'xr-empty' }, '还没有规则。在上面输入域名或 IP 后点按钮添加。'));
+			drawHints();
+		}
+		function commitExc(msg) {
+			var parts = [ [ 'direct_ips', cfg.direct_ips || '' ], [ 'direct_domains', cfg.direct_domains || '' ], [ 'proxy_ips', cfg.proxy_ips || '' ], [ 'proxy_domains', cfg.proxy_domains || '' ] ];
+			var chain = Promise.resolve();
+			parts.forEach(function(p) { chain = chain.then(function() { return sub([ 'set', p[0], p[1] ]); }).then(function(out) { if ((out || '').trim() !== 'ok') throw new Error((out || '').trim()); }); });
+			return chain.then(function() { return st.run ? sub([ 'exc-apply' ]) : ''; }).then(function() { drawExc(); note(msg, 'info'); }, function(e) { note('保存失败：' + (e.message || e), 'danger'); });
+		}
+		function excLists() {
+			return { direct_domains: (cfg.direct_domains || '').split(' ').filter(Boolean), direct_ips: (cfg.direct_ips || '').split(' ').filter(Boolean), proxy_domains: (cfg.proxy_domains || '').split(' ').filter(Boolean), proxy_ips: (cfg.proxy_ips || '').split(' ').filter(Boolean) };
+		}
+		function removeExc(it) {
+			var L = excLists(), key = (it.kind === 'direct' ? 'direct_' : 'proxy_') + (it.ip ? 'ips' : 'domains');
+			L[key] = L[key].filter(function(v) { return v !== it.v; });
+			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
+			commitExc('已删除 ' + it.v + (st.run ? '，之后新建的连接生效。' : '，代理开启后生效。'));
+		}
+		var excIn = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '域名或 IP，如 example.com', 'autocomplete': 'off', 'spellcheck': 'false' });
+		function addExc(kind) {
+			var raw = excIn.value.split(/[\s,;，；]+/).filter(Boolean);
+			if (!raw.length) { note('请先输入域名或 IP。', 'danger'); return; }
+			var L = excLists();
+			raw.forEach(function(t) {
+				var ip = IP4.test(t);
+				var mine = kind === 'direct' ? (ip ? L.direct_ips : L.direct_domains) : (ip ? L.proxy_ips : L.proxy_domains);
+				var other = kind === 'direct' ? (ip ? L.proxy_ips : L.proxy_domains) : (ip ? L.direct_ips : L.direct_domains);
+				var i = other.indexOf(t); if (i >= 0) other.splice(i, 1);
+				if (mine.indexOf(t) < 0) mine.push(t);
+			});
+			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
+			excIn.value = '';
+			commitExc('已加入' + (kind === 'direct' ? '强制直连' : '强制走代理') + (st.run ? '，之后新建的连接生效。' : '，代理开启后生效。'));
+		}
+		var addDirectBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { addExc('direct'); } }, '强制直连');
+		var addProxyBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() { addExc('proxy'); } }, '强制走代理');
 
 		/* ------------ backup: export / import the settings of this page ------------ */
-		var BAK_KEYS = [ 'enabled', 'node_name', 'auto_switch', 'clients', 'sub_url', 'sub_hours', 'chain', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains' ];
+		var BAK_KEYS = [ 'enabled', 'node_name', 'auto_switch', 'block_quic', 'clients', 'sub_url', 'sub_hours', 'chain', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains' ];
 		var expBtn = E('button', { 'type': 'button', 'class': 'xr-btn', 'click': function() {
 			sub([ 'get' ]).then(function(t) {
 				var c = kv(t), o = {}, now = new Date();
@@ -647,7 +697,7 @@ return view.extend({
 				var o; try { o = JSON.parse(rd.result); } catch (e) { o = null; }
 				if (!o || o.type !== 'xray-sub-settings' || !o.config || typeof o.config !== 'object') { note('这不是本页导出的设置文件。', 'danger'); return; }
 				var pairs = [];
-				[ 'sub_hours', 'auto_switch', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains', 'chain', 'sub_url', 'clients', 'node_name', 'enabled' ].forEach(function(k) {
+				[ 'sub_hours', 'auto_switch', 'block_quic', 'direct_ips', 'proxy_ips', 'direct_domains', 'proxy_domains', 'chain', 'sub_url', 'clients', 'node_name', 'enabled' ].forEach(function(k) {
 					var v = o.config[k]; if (typeof v !== 'string') return;
 					if ((k === 'sub_hours' || k === 'auto_switch') && v === '') return;
 					pairs.push([ k, v ]);
@@ -796,6 +846,27 @@ return view.extend({
 			if (!cfg.chain) { note('当前没有设置链式代理。', 'info'); return; }
 			saveChain('');
 		} }, '清除链式代理');
+		function chainLabel(u) {
+			var m = String(u).match(/^([a-z0-9]+):\/\/(?:[^@/?#]+@)?(\[[^\]]+\]|[^:/?#]+):(\d+)/i);
+			return m ? m[1] + '://' + m[2] + ':' + m[3] : String(u).slice(0, 42);
+		}
+		function fillChain(u) {
+			chainIn.value = u;
+			if (fillFields(u)) chainMode = 'fields'; else chainMode = 'link';
+			drawChainMode();
+			note('已填入，确认无误后点“保存并应用”。', 'info');
+		}
+		var histBox = E('div', { 'class': 'xr-sel' });
+		chainHist.forEach(function(u) {
+			if (u === (cfg.chain || '')) return;
+			var chip = E('span', { 'class': 'xr-sc' }, [
+				E('span', { 'style': 'cursor:pointer', 'title': '填回这个地址', 'click': function() { fillChain(u); } }, chainLabel(u)),
+				E('button', { 'type': 'button', 'title': '不再记住', 'click': function() {
+					sub([ 'chain-forget', u ]).then(function() { if (chip.parentNode) chip.parentNode.removeChild(chip); });
+				} }, '×')
+			]);
+			histBox.appendChild(chip);
+		});
 
 		/* ------------ summaries shown next to each section title ------------ */
 		function drawHints() {
@@ -809,7 +880,7 @@ return view.extend({
 			hSplit.textContent = (nd ? '直连 ' + nd : '') + (nd && np ? ' · ' : '') + (np ? '代理 ' + np : '') || '无';
 		}
 
-		drawStatus(); drawMode(); drawScope(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); drawChainMode(); drawNodeMode(); drawHealth(); drawSubInfo(); drawHints();
+		drawStatus(); drawMode(); drawScope(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); drawChainMode(); drawNodeMode(); drawHealth(); drawSubInfo(); drawExc(); drawHints();
 
 		var pollN = 0, devSig = JSON.stringify(devs);
 		poll.add(function() {
@@ -847,6 +918,8 @@ return view.extend({
 				E('div', { 'class': 'xr-lab' }, '哪些设备走代理'),
 				E('div', { 'class': 'xr-seg' }, [ sAll, sPick ]),
 				devAllTip, devWrap,
+				E('label', { 'class': 'xr-opt', 'style': 'margin-top:14px' }, [ quicCb, '拦截 QUIC（UDP 443），避免 App 判定在不支持的地区' ]),
+				E('p', { 'class': 'xr-tip' }, '只对走代理的设备生效。拦截后这些设备的 QUIC 连接会失败并自动改走 TCP，从而经过代理。'),
 				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, saveMode)
 			])),
 
@@ -860,16 +933,17 @@ return view.extend({
 			])),
 
 			section('分流例外', hSplit, E('div', {}, [
-				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。这里每行写一个域名（如 example.com，它的子域名一并生效）或 IPv4 地址 / 网段（如 1.2.3.0/24）：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
-				E('div', { 'class': 'xr-lab', 'style': 'margin-top:0' }, '强制直连'), taDirect,
-				E('div', { 'class': 'xr-lab' }, '强制走代理'), taProxy,
-				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, saveSplit)
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。在下面输入一个域名（如 example.com，子域名一并生效）或 IPv4 地址 / 网段，点按钮加入。已经生效的在下拉列表里，点 × 删除：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
+				E('div', { 'class': 'xr-row xr-inline' }, [ excIn, addDirectBtn, addProxyBtn ]),
+					E('div', { 'class': 'xr-lab' }, '已生效的规则'), excDD.root
 			])),
 
 			section('链式代理（家宽出口）', hChain, E('div', {}, [
 				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, '留空：流量直接从所选节点出去。填写后：所选节点作为前置，流量再经过这个代理出去，网站看到的是它的 IP（比如家宽出口）。'),
 				E('div', { 'class': 'xr-seg' }, [ mFields, mLink ]),
 				chainForm, chainLink,
+				histBox.firstChild ? E('div', { 'class': 'xr-lab' }, '以前填过的（点一下填回，不会自动生效）') : '',
+				histBox,
 				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, [ chainTestBtn, chainSaveBtn, chainClearBtn ]),
 				chainOut,
 				E('p', { 'class': 'xr-tip' }, '注意：①前置节点要能访问这个代理的地址，有些家宽代理只允许白名单 IP；②多一跳会更慢；③链式代理失效时，国外流量会直接不通，不会自动回退到所选节点；④账号密码保存在路由器里，页面上默认隐藏；⑤只支持 TCP。')

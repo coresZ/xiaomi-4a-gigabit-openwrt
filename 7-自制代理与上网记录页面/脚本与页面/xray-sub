@@ -1,6 +1,7 @@
 #!/bin/sh
 # xray-sub: VLESS subscription + transparent proxy helper
 D=/etc/xray
+CH=$D/chain-history   # chain addresses used before, newest first; holds credentials, mode 600
 cfg() { uci -q get xray.main.$1; }
 mainpid() { ps | grep "[x]r -sub" | grep -v -- "-port 7893" | awk '{print $1}' | head -1; }
 # when memory runs out the kernel must sacrifice a test instance (chain test), never the proxy that devices use
@@ -28,10 +29,21 @@ ip_elems() {
 # The node list and statistics only depend on sub.txt, but computing them means starting xr, which has to unpack
 # ~15 MB in RAM (slow, and several at once exhaust memory). So compute once, cache in /tmp, and let only one run at a time.
 LC=/tmp/xray.list; SC=/tmp/xray.stats; LK=/tmp/xray.lock
+# remember a chain address (duplicates dropped, 8 kept)
+chain_remember() {
+	[ -n "$1" ] || return 0
+	touch $CH; chmod 600 $CH
+	grep -vxF "$1" $CH > $CH.new 2>/dev/null || :
+	{ echo "$1"; cat $CH.new; } | head -n 8 > $CH.tmp && mv $CH.tmp $CH
+	rm -f $CH.new
+}
 cache_ok() { [ -s "$LC" ] && [ -s "$SC" ] && [ "$LC" -nt "$D/sub.txt" ]; }
 ensure_cache() {
 	cache_ok && return 0
 	[ -s "$D/sub.txt" ] || return 1
+	# rebuilding the cache starts xr, which needs ~15 MB it does not have when the router is already short
+	avail=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
+	[ "${avail:-0}" -ge 14000 ] || return 1
 	w=0
 	while [ $w -lt 40 ]; do
 		if mkdir "$LK" 2>/dev/null; then
@@ -303,6 +315,8 @@ rules)
 		DE=""; PE=""
 		sed -e "s/@PORT@/${port:-7892}/" -e "s#@CLIENT@#$CL#" -e "s#@CLIENT6@#$CL6#" -e "s#@DIRECT@#$DE#" -e "s#@PROXY@#$PE#" $D/xray.nft > /tmp/xray.rules.nft
 		if nft -f /tmp/xray.rules.nft; then
+			# block_quic defaults to on: the template already drops UDP 443. "0" removes that table.
+			[ "$(cfg block_quic)" = 0 ] && nft delete table ip xrayudp 2>/dev/null
 			echo "rules on (clients: ${clients:-all})"
 			rm -f /tmp/xray.exc.proxy /tmp/xray.exc.direct; resolve_domains; exc_apply
 		fi
@@ -356,11 +370,11 @@ devices)
 	rm -f /tmp/xray.wifi /tmp/xray.neigh
 	;;
 get)
-		for k in enabled node_name node clients sub_url port chain sub_hours auto_switch direct_ips proxy_ips direct_domains proxy_domains; do echo "$k=$(cfg $k)"; done
+		for k in enabled node_name node clients sub_url port chain sub_hours auto_switch block_quic direct_ips proxy_ips direct_domains proxy_domains; do echo "$k=$(cfg $k)"; done
 		echo "sub_check=$(cat /tmp/xray.subcheck 2>/dev/null)"; echo "sub_change=$(fresh_ts $D/sub.txt)"
 	;;
 set)
-		case "$2" in enabled|node_name|node|clients|sub_url|port|chain|sub_hours|auto_switch|direct_ips|proxy_ips|direct_domains|proxy_domains) ;; *) echo "bad key"; exit 1 ;; esac
+		case "$2" in enabled|node_name|node|clients|sub_url|port|chain|sub_hours|auto_switch|block_quic|direct_ips|proxy_ips|direct_domains|proxy_domains) ;; *) echo "bad key"; exit 1 ;; esac
 		case "$2" in
 		node_name) set -- "$1" "$2" "$(printf '%s' "$3" | fuzzy_ms)" ;;
 		sub_hours) echo "$3" | grep -qE '^[0-9]{1,3}$' && [ "$3" -le 720 ] || { echo "bad value"; exit 1; } ;;
@@ -372,7 +386,7 @@ set)
 			done
 			[ $cnt -le 300 ] || { echo "too many entries (max 300)"; exit 1; }
 			set -- "$1" "$2" "$(echo $clean)" ;;
-		auto_switch) case "$3" in 0|1) ;; *) echo "bad value"; exit 1 ;; esac ;;
+		auto_switch|block_quic) case "$3" in 0|1) ;; *) echo "bad value"; exit 1 ;; esac ;;
 		direct_ips|proxy_ips)
 			# every item must be a valid IPv4 address or CIDR block; the stored value is the cleaned list
 			cnt=0; for t in $3; do cnt=$((cnt + 1)); [ -n "$(ip_elems "$t")" ] || { echo "bad value: $t"; exit 1; }; done
@@ -386,6 +400,16 @@ set)
 		err=$(/usr/bin/xr -check-chain "$3" 2>&1) || { echo "$err"; exit 1; }
 	fi
 	uci set "xray.main.$2=$3" && uci commit xray && echo ok
+	[ "$2" = chain ] && [ -n "$3" ] && chain_remember "$3"
+	;;
+chain-history)
+	# addresses saved before, newest first; clearing the current one does not remove them
+	[ -n "$(cfg chain)" ] && chain_remember "$(cfg chain)"
+	[ -s $CH ] && cat $CH
+	;;
+chain-forget)
+	[ -n "$2" ] && [ -f $CH ] && { grep -vxF "$2" $CH > $CH.new; mv $CH.new $CH; }
+	echo ok
 	;;
 chain-test-start)
 	# xray-sub chain-test-start [address] : use the selected node as the front hop and report where traffic leaves
@@ -447,6 +471,6 @@ status)
 	ensure_cache; echo "sub     : $(wc -l < "$LC" 2>/dev/null || echo 0) nodes"
 	;;
 *)
-	echo "usage: xray-sub update | auto-update | list | exc-list | exc-add <proxy|direct> <x> | exc-del <x> | exc-apply | domains-refresh | get | set K V | apply | rules on|off | health | probe | pick-next | switch-next | chain-test-start | status | watchdog"
+	echo "usage: xray-sub update | auto-update | list | exc-list | exc-add <proxy|direct> <x> | exc-del <x> | exc-apply | domains-refresh | get | set K V | apply | rules on|off | health | probe | pick-next | switch-next | chain-test-start | chain-history | chain-forget | status | watchdog"
 	;;
 esac

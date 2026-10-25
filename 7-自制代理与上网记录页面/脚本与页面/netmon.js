@@ -147,7 +147,10 @@ var CSS = [
 	'.nm-item .nm-t{display:inline}',
 	'.nm-row>.nm-btn{flex:1 1 auto}',
 	'.nm-seg{width:100%}.nm-seg button{flex:1;padding:4px 6px}',
-	'}'
+	'}',
+	'.nm-card{background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden}',
+	'.nm-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#5b7cff,#14b8a6)}',
+	'html.dark .nm-card{background:rgba(255,255,255,.05)}',
 ].join('\n');
 
 /* ---------------------------------------------------------------- helpers */
