@@ -8,7 +8,7 @@ var BIN = '/usr/bin/netmon';
 var XBIN = '/usr/bin/xray-sub';   /* only used for the "always proxy / always direct" buttons; the page works without it */
 
 var CSS = [
-	'.nm{width:100%;max-width:1100px;min-width:0;margin:0 auto;padding-top:36px;--nm-a:#5b7cff;--nm-a2:#8b5cf6;--nm-dn:#5b7cff;--nm-up:#14b8a6;--nm-ok:#22c55e;--nm-bad:#ef4444;--nm-line:rgba(127,127,127,.26);--nm-soft:rgba(127,127,127,.08);--nm-r:18px}',
+	'.nm{width:100%;max-width:1100px;min-width:0;margin:0 auto;padding-top:36px;--nm-a:#5b7cff;--nm-a2:#8b5cf6;--nm-dn:#5b7cff;--nm-up:#14b8a6;--nm-ok:#22c55e;--nm-bad:#ef4444;--nm-line:rgba(127,127,127,.26);--nm-soft:rgba(127,127,127,.08);--nm-r:6px}',
 	'.nm *{box-sizing:border-box}',
 	/* hero */
 	'.nm-hero{border-radius:22px;padding:16px 16px 12px;margin:0 0 12px;color:#fff;background:linear-gradient(135deg,#5b7cff 0%,#7c5cff 55%,#a35cf0 100%);box-shadow:0 10px 30px rgba(91,124,255,.28);position:relative;overflow:hidden}',
@@ -96,7 +96,10 @@ var CSS = [
 	'.nm-dn{flex:1 1 auto;min-width:0}',
 	'.nm-dn b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 	'.nm-dn small{display:block;font-size:11.5px;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-	'.nm-rate{flex:0 0 auto;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}',
+	'.nm-rate{flex:0 0 auto;display:grid;grid-template-columns:1em max-content 4.8ch;column-gap:4px;align-items:baseline;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.35;white-space:nowrap}',
+	'.nm-rate .ar{text-align:center}',
+	'.nm-rate .n{text-align:right}',
+	'.nm-rate .unit{text-align:left}',
 	'.nm-rate .d{color:var(--nm-dn);font-weight:700}.nm-rate .u{color:var(--nm-up);font-weight:700}',
 	'.nm-share{height:4px;border-radius:99px;background:rgba(127,127,127,.2);overflow:hidden;margin:7px 0 4px}',
 	'.nm-share i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--nm-a),var(--nm-a2))}',
@@ -140,7 +143,7 @@ var CSS = [
 	'.nm-dhead{gap:10px}',
 	'.nm{padding-top:40px}.nm-hero{padding:16px 14px 12px;border-radius:18px}',
 	'.nm-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}.nm-tile{padding:6px 9px}.nm-tile .v{font-size:16px}',
-	'.nm-card{padding:12px;border-radius:14px}',
+	'.nm-card{padding:12px;border-radius:6px}',
 	'.nm-dgrid{grid-template-columns:minmax(0,1fr)}',
 	'.nm-chart{height:120px}',
 	'.nm-item{grid-template-columns:1fr;gap:2px;padding:10px 2px}',
@@ -148,8 +151,8 @@ var CSS = [
 	'.nm-row>.nm-btn{flex:1 1 auto}',
 	'.nm-seg{width:100%}.nm-seg button{flex:1;padding:4px 6px}',
 	'}',
-	'.nm-card{background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden}',
-	'.nm-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#5b7cff,#14b8a6)}',
+	'.nm-card{background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden;padding-left:14px}',
+	'.nm-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:linear-gradient(180deg,#5b7cff,#14b8a6)}',
 	'html.dark .nm-card{background:rgba(255,255,255,.05)}',
 ].join('\n');
 
@@ -192,6 +195,13 @@ function rate(bps) {
 	return [(bits / 1e6).toFixed(bits < 1e7 ? 2 : 1), 'Mbps'];
 }
 function fmtR(bps) { var r = rate(bps); return r[0] + ' ' + r[1]; }
+function rateBox(q) {
+		function cells(cls, arrow, bps) {
+			var r = rate(bps);
+			return [ E('span', { 'class': 'ar ' + cls }, arrow), E('span', { 'class': 'n ' + cls }, r[0]), E('span', { 'class': 'unit ' + cls }, r[1]) ];
+		}
+		return E('div', { 'class': 'nm-rate' }, cells('d', '↓', q.d).concat(cells('u', '↑', q.u)));
+	}
 function hue(s) { var h = 0, i; for (i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
 function color(s) { return 'hsl(' + hue(s) + ',62%,52%)'; }
 function grad(s) { var h = hue(s); return 'linear-gradient(135deg,hsl(' + h + ',68%,58%),hsl(' + ((h + 40) % 360) + ',68%,48%))'; }
@@ -374,7 +384,7 @@ return view.extend({
 					E('div', { 'class': 'nm-dh' }, [
 						E('div', { 'class': 'nm-av', 'style': 'background:' + grad(r.mac) }, [ initial(r), E('i', { 'class': r.online ? 'on' : '' }) ]),
 						E('div', { 'class': 'nm-dn' }, [ E('b', { 'title': devName(r) }, devName(r)), E('small', {}, [ r.ip + (r.online ? ' · 在线' : ' · 离线') ].concat(devTags(r))) ]),
-						E('div', { 'class': 'nm-rate' }, [ E('div', { 'class': 'd' }, '↓ ' + fmtR(q.d)), E('div', { 'class': 'u' }, '↑ ' + fmtR(q.u)) ]),
+						rateBox(q),
 						E('span', { 'class': 'nm-go' }, '›')
 					]),
 					E('div', { 'class': 'nm-share' }, E('i', { 'style': 'width:' + share + '%' })),
@@ -552,7 +562,7 @@ return view.extend({
 				E('div', { 'class': 'nm-av', 'style': 'background:' + grad(r.mac) }, [ initial(r), E('i', { 'class': r.online ? 'on' : '' }) ]),
 				nameBox,
 				renaming ? '' : E('button', { 'type': 'button', 'class': 'nm-edit', 'title': '重命名', 'click': function() { renaming = true; drawDetailHead(); } }, '✎'),
-				E('div', { 'class': 'nm-rate' }, [ E('div', { 'class': 'd' }, '↓ ' + fmtR(q.d)), E('div', { 'class': 'u' }, '↑ ' + fmtR(q.u)) ])
+				rateBox(q)
 			]));
 			if (isBlocked) dHead.appendChild(E('div', { 'class': 'nm-alert', 'style': 'margin:12px 0 0' }, '已禁止这台设备联网：它访问不了外网，但仍能打开路由器后台。点下面的“恢复联网”即可解除。'));
 			if (lim && usedToday >= lim) dHead.appendChild(E('div', { 'class': 'nm-alert warn', 'style': 'margin:12px 0 0' }, '⚠ 今日流量 ' + fmtB(usedToday) + '，已超过每日上限 ' + fmtB(lim) + '。'));

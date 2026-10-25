@@ -244,7 +244,7 @@ exc-add)
 	# xray-sub exc-add <proxy|direct> <ip|cidr|domain> : always send this destination through the proxy / always direct
 	kind="$2"; tok=$(norm_domain "$3")
 	case "$kind" in proxy) other=direct ;; direct) other=proxy ;; *) echo "bad kind"; exit 1 ;; esac
-	if [ -n "$(ip_elems "$tok")" ]; then key=ips; elif is_domain "$tok"; then key=domains; else echo "bad value: $3"; exit 1; fi
+	if [ -n "$(ip_elems "$tok")" ]; then key=ips; elif is_domain "$tok"; then key=domains; else echo "不是域名或地址：$3"; exit 1; fi
 	cur=$(cfg ${kind}_$key); newoth=""
 	for x in $(cfg ${other}_$key); do [ "$x" = "$tok" ] || newoth="$newoth $x"; done
 	case " $cur " in *" $tok "*) ;; *) cur="$cur $tok" ;; esac
@@ -381,7 +381,7 @@ set)
 		direct_domains|proxy_domains)
 			cnt=0; clean=""
 			for t in $3; do
-				t=$(norm_domain "$t"); is_domain "$t" || { echo "bad value: $t"; exit 1; }
+				t=$(norm_domain "$t"); is_domain "$t" || { echo "不是域名：$t（中文域名请在页面里添加，如 百度.com）"; exit 1; }
 				cnt=$((cnt + 1)); clean="$clean $t"
 			done
 			[ $cnt -le 300 ] || { echo "too many entries (max 300)"; exit 1; }

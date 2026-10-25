@@ -11,7 +11,7 @@ var CSS = [
 	'.xr *{box-sizing:border-box}',
 	'.xr-title{font-size:24px;font-weight:800;letter-spacing:.5px;margin:0 0 2px}',
 	'.xr-sub{opacity:.7;font-size:13px;margin:0 0 12px}',
-	'.xr-card{min-width:0;border:1px solid var(--xr-line);border-radius:18px;padding:12px 14px;margin:0 0 10px;background:var(--xr-soft)}',
+	'.xr-card{min-width:0;border:1px solid var(--xr-line);border-radius:6px;padding:12px 14px;margin:0 0 10px;background:var(--xr-soft)}',
 	/* hero: current node, state chips, the two quick actions */
 	'.xr-hero{background:linear-gradient(135deg,#5b7cff 0%,#7c5cff 55%,#a35cf0 100%);color:#fff;border:0;box-shadow:0 10px 30px rgba(91,124,255,.28);position:relative;overflow:hidden;border-radius:22px;padding:16px;margin-bottom:12px}',
 	'.xr-hero:before{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.10)}',
@@ -73,12 +73,26 @@ var CSS = [
 	'.xr-opt .f{flex:0 0 auto;font-size:17px;line-height:1}',
 	'.xr-opt .n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}',
 	'.xr-opt .n small{font-weight:400;font-size:11.5px;opacity:.6;margin-left:6px}',
-	'.xr-opt.two{min-height:52px;padding:6px 12px;gap:10px}',
-	'.xr-opt.two .n{font-size:15px}',
-	'.xr-opt.two .n small{display:block;margin:2px 0 0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+	'.xr-opt.two{min-height:42px;padding:5px 10px;gap:8px;align-items:center}',
+	'.xr-opt.two .n{font-size:14px;line-height:1.25;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+	'.xr-opt.two .n small{display:inline;margin-left:6px;font-size:12px;white-space:nowrap}',
+	'.xr-opt .bar{flex:0 0 auto;align-self:center;width:2px;height:14px;border-radius:2px;background:var(--xr-ok)}',
 	'.xr-opt.two .f{font-size:22px}',
-	'.xr-opt .t{flex:0 0 auto;font-size:11px;padding:0 7px;line-height:18px;border-radius:99px;border:1px solid var(--xr-line);opacity:.85;white-space:nowrap}',
+	'.xr-opt .t{align-self:center;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:56px;height:18px;font-size:11px;padding:0 4px;line-height:18px;border-radius:4px;border:1px solid var(--xr-line);opacity:.85;white-space:nowrap;overflow:hidden}',
 	'.xr-opt .t.on{background:var(--xr-ok);border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.ss{background:#0d9488;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.tr{background:#d97706;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.vl{background:#7c3aed;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.hp{background:#2563eb;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.go{background:#16a34a;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.sk{background:#4f46e5;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c0{background:#7c3aed;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c1{background:#2563eb;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c2{background:#0d9488;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c3{background:#d97706;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c4{background:#db2777;border-color:transparent;color:#fff;opacity:1}',
+	'.xr-opt .t.c5{background:#4f46e5;border-color:transparent;color:#fff;opacity:1}',
+	
 	'.xr-opt .s{flex:0 0 auto;font-size:11.5px;opacity:.65}',
 	'.xr-opt .xr-dot{background:#94a3b8}.xr-opt .xr-dot.ok{background:var(--xr-ok)}',
 	'.xr-opt .d{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}',
@@ -104,11 +118,11 @@ var CSS = [
 	'@media (max-width:640px){',
 	'.xr-now .big{font-size:20px}',
 	'.xr-hero{padding:14px}',
-	'.xr-card{padding:10px 12px;border-radius:14px}',
+	'.xr-card{padding:10px 12px}',
 	'.xr-row:not(.xr-inline)>.xr-btn{flex:1 1 auto}',
 	'}',
-	'.xr-card:not(.xr-hero){background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden}',
-	'.xr-card:not(.xr-hero):before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#5b7cff,#8b5cf6)}',
+	'.xr-card:not(.xr-hero){background:#fff;border-color:rgba(91,124,255,.10);box-shadow:0 8px 24px rgba(30,41,80,.05);position:relative;overflow:hidden;padding-left:14px}',
+	'.xr-card:not(.xr-hero):before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:linear-gradient(180deg,#5b7cff,#8b5cf6)}',
 	'.xr-two .xr-btn{background:rgba(255,255,255,.24);border-color:rgba(255,255,255,.62)}',
 	'details.xr-det>summary:hover .xr-hint{opacity:1}',
 	'html.dark .xr-card{background:rgba(255,255,255,.05)}',
@@ -503,10 +517,12 @@ return view.extend({
 					regionDD.root.classList.add('open');   /* then the region */
 				} });
 				cb.checked = k === prov;
-				provList.appendChild(E('label', { 'class': 'xr-opt two' + (k === prov ? ' cur' : '') }, [
-					cb, E('span', { 'class': 'n' }, k === null ? '全部来源' : (k || '未标注')),
+								provList.appendChild(E('label', { 'class': 'xr-opt two' + (k === prov ? ' cur' : '') }, [
+					E('span', { 'class': 'bar' }),
+					cb, E('span', { 'class': 't ' + colorTag(k || 'all') }, '来源'),
+					E('span', { 'class': 'n' }, k === null ? '全部来源' : (k || '未标注')),
 					E('span', { 'class': 's' }, (k === null ? nodes.length : provCount[k]) + ' 个')
-				]));
+					]));
 			});
 		}
 		function drawRegions() {
@@ -517,12 +533,24 @@ return view.extend({
 					nodeDD.root.classList.add('open');   /* go straight on to the node list */
 				} });
 				cb.checked = k === region;
-				regionList.appendChild(E('label', { 'class': 'xr-opt two' + (k === region ? ' cur' : '') }, [
-					cb, E('span', { 'class': 'f' }, regionFlag[k] || '🌐'), E('span', { 'class': 'n' }, k),
+								regionList.appendChild(E('label', { 'class': 'xr-opt two' + (k === region ? ' cur' : '') }, [
+					E('span', { 'class': 'bar' }),
+					cb, E('span', { 'class': 't ' + colorTag(k) }, regionFlag[k] || '地区'),
+					E('span', { 'class': 'n' }, k),
 					E('span', { 'class': 's' }, regionCount[k] + ' 个')
-				]));
+					]));
 			});
 			if (!regionOrder.length) regionList.appendChild(E('div', { 'class': 'xr-empty' }, '没有节点。请先在“订阅设置”里填写地址并更新。'));
+		}
+		function colorTag(s) { var h = 0, i; s = s || ''; for (i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return 'c' + (h % 6); }
+		function protoTag(kind) {
+			var k = kind || '';
+			if (k.indexOf('ss') === 0) return [ 'ss', 'SS' ];
+			if (k.indexOf('trojan') === 0) return [ 'tr', 'Trojan' ];
+			if (k.indexOf('reality') >= 0) return [ 'vl', 'Reality' ];
+			if (k.indexOf('ws') === 0) return [ 'hp', 'WS' ];
+			if (k.indexOf('tls') >= 0) return [ 'go', 'TLS' ];
+			return [ '', 'TCP' ];
 		}
 		function drawNodes() {
 			var cur = currentNode(nodes, cfg.node_name), list = visible();
@@ -532,11 +560,14 @@ return view.extend({
 				var on = !!(selected && selected.idx === n.idx);
 				var cb = E('input', { 'type': 'checkbox', 'change': function() { selected = n; drawNodeBtn(); drawNodes(); nodeDD.close(); } });
 				cb.checked = on;
+								var tg = protoTag(n.kind);
 				nodeList.appendChild(E('label', { 'class': 'xr-opt two' + (on ? ' cur' : ''), 'title': n.name }, [
+					E('span', { 'class': 'bar' }),
 					cb,
-					E('span', { 'class': 'n' }, [ n.info.title, E('small', {}, badgeText(n.kind) + (n.info.provider ? ' · ' + n.info.provider : '')) ]),
+					E('span', { 'class': 't ' + tg[0] }, tg[1]),
+					E('span', { 'class': 'n' }, [ n.info.title, n.info.provider ? E('small', {}, n.info.provider) : '' ]),
 					cur && cur.idx === n.idx ? E('span', { 'class': 't on' }, '当前') : ''
-				]));
+					]));;
 			});
 			if (!list.length) nodeList.appendChild(E('div', { 'class': 'xr-empty' }, '没有符合条件的节点。'));
 		}
@@ -619,6 +650,56 @@ return view.extend({
 
 		/* ------------ split routing exceptions ------------ */
 		var IP4 = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+		/* punycode label -> unicode, so a stored xn-- name is shown as the Chinese domain the user typed */
+		function punyAdapt(delta, numPoints, first) {
+			delta = first ? Math.floor(delta / 700) : delta >> 1;
+			delta += Math.floor(delta / numPoints);
+			var k = 0;
+			while (delta > 455) { delta = Math.floor(delta / 35); k += 36; }
+			return k + Math.floor(36 * delta / (delta + 38));
+		}
+		function punyLabel(label) {
+			if (label.length < 5 || label.slice(0, 4) !== 'xn--') return label;
+			var input = label.slice(4), n = 128, i = 0, bias = 72, output = [], basic = input.lastIndexOf('-'), idx = 0, j;
+			if (basic > 0) {
+				for (j = 0; j < basic; j++) { if (input.charCodeAt(j) >= 128) return label; output.push(input.charCodeAt(j)); }
+				idx = basic + 1;
+			}
+			while (idx < input.length) {
+				var oldi = i, w = 1, k;
+				for (k = 36; ; k += 36) {
+					if (idx >= input.length) return label;
+					var ch = input.charCodeAt(idx++), digit = (ch >= 48 && ch <= 57) ? ch - 22 : (ch >= 97 && ch <= 122) ? ch - 97 : 36;
+					if (digit >= 36 || i > 0x10FFFF) return label;
+					i += digit * w;
+					var t = k <= bias ? 1 : (k >= bias + 26 ? 26 : k - bias);
+					if (digit < t) break;
+					w *= 36 - t;
+				}
+				var len = output.length + 1;
+				bias = punyAdapt(i - oldi, len, oldi === 0);
+				n += Math.floor(i / len); i %= len;
+				if (n > 0x10FFFF) return label;
+				output.splice(i++, 0, n);
+			}
+			try { return output.map(function(cp) { return String.fromCodePoint(cp); }).join(''); }
+			catch (e) { return label; }
+		}
+		function showHost(v) { return String(v).split('.').map(punyLabel).join('.'); }
+		/* an address, or a domain (Chinese included) turned into the ASCII form the router can resolve */
+		function hostToken(raw) {
+			var t = String(raw).trim().replace(/[。．]/g, '.').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+			t = t.replace(/^\*\./, '').replace(/^\.+|\.+$/g, '');
+			if (!t) return null;
+			if (IP4.test(t)) return { ip: true, v: t };
+			t = t.split(/[/?#]/)[0].replace(/^\.+|\.+$/g, '');
+			if (!t || IP4.test(t)) return t && IP4.test(t) ? { ip: true, v: t } : null;
+			var h;
+			try { h = new URL('http://' + t).hostname; } catch (e) { return null; }
+			h = String(h).replace(/\.$/, '').toLowerCase();
+			if (!/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$/.test(h) || h.length > 253) return null;
+			return { ip: false, v: h };
+		}
 		function excItems() {
 			var out = [];
 			function add(kind, key, ip) { (cfg[key] || '').split(' ').filter(Boolean).forEach(function(v) { out.push({ kind: kind, v: v, ip: ip }); }); }
@@ -635,7 +716,7 @@ return view.extend({
 			items.forEach(function(it) {
 				excList.appendChild(E('div', { 'class': 'xr-opt' }, [
 					E('span', { 'class': 't' + (it.kind === 'proxy' ? ' on' : '') }, it.kind === 'proxy' ? '走代理' : '直连'),
-					E('span', { 'class': 'n' }, it.v),
+					E('span', { 'class': 'n' }, showHost(it.v)),
 					E('button', { 'type': 'button', 'class': 'xr-mini', 'title': '删除这条规则', 'click': function(ev) { ev.preventDefault(); ev.stopPropagation(); removeExc(it); } }, '×')
 				]));
 			});
@@ -657,17 +738,19 @@ return view.extend({
 			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
 			commitExc('已删除 ' + it.v + (st.run ? '，之后新建的连接生效。' : '，代理开启后生效。'));
 		}
-		var excIn = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '域名或 IP，如 example.com', 'autocomplete': 'off', 'spellcheck': 'false' });
+		var excIn = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '域名或 IP，如 example.com、百度.com', 'autocomplete': 'off', 'spellcheck': 'false' });
 		function addExc(kind) {
 			var raw = excIn.value.split(/[\s,;，；]+/).filter(Boolean);
 			if (!raw.length) { note('请先输入域名或 IP。', 'danger'); return; }
+			var bad = [], items = [];
+			raw.forEach(function(t) { var d = hostToken(t); if (!d) bad.push(t); else items.push(d); });
+			if (bad.length) { note('没法加入：' + bad.join('、') + '。请填域名（可以是中文，如 百度.com）或 IPv4 地址 / 网段。', 'danger'); return; }
 			var L = excLists();
-			raw.forEach(function(t) {
-				var ip = IP4.test(t);
-				var mine = kind === 'direct' ? (ip ? L.direct_ips : L.direct_domains) : (ip ? L.proxy_ips : L.proxy_domains);
-				var other = kind === 'direct' ? (ip ? L.proxy_ips : L.proxy_domains) : (ip ? L.direct_ips : L.direct_domains);
-				var i = other.indexOf(t); if (i >= 0) other.splice(i, 1);
-				if (mine.indexOf(t) < 0) mine.push(t);
+			items.forEach(function(d) {
+				var mine = kind === 'direct' ? (d.ip ? L.direct_ips : L.direct_domains) : (d.ip ? L.proxy_ips : L.proxy_domains);
+				var other = kind === 'direct' ? (d.ip ? L.proxy_ips : L.proxy_domains) : (d.ip ? L.direct_ips : L.direct_domains);
+				var i = other.indexOf(d.v); if (i >= 0) other.splice(i, 1);
+				if (mine.indexOf(d.v) < 0) mine.push(d.v);
 			});
 			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
 			excIn.value = '';
@@ -846,27 +929,46 @@ return view.extend({
 			if (!cfg.chain) { note('当前没有设置链式代理。', 'info'); return; }
 			saveChain('');
 		} }, '清除链式代理');
+		function chainScheme(u) {
+			var m = String(u).match(/^([a-z0-9]+):/i), sch = m ? m[1].toLowerCase() : '';
+			if (sch === 'socks5' || sch === 'socks') return [ 'sk', 'SOCKS5' ];
+			if (sch === 'http') return [ 'hp', 'HTTP' ];
+			if (sch === 'vless') return [ 'vl', 'VLESS' ];
+			if (sch === 'ss') return [ 'ss', 'SS' ];
+			if (sch === 'trojan') return [ 'tr', 'Trojan' ];
+			return [ '', sch ? sch.toUpperCase() : '地址' ];
+		}
 		function chainLabel(u) {
 			var m = String(u).match(/^([a-z0-9]+):\/\/(?:[^@/?#]+@)?(\[[^\]]+\]|[^:/?#]+):(\d+)/i);
-			return m ? m[1] + '://' + m[2] + ':' + m[3] : String(u).slice(0, 42);
+			return m ? m[2] + ':' + m[3] : String(u).slice(0, 42);
 		}
 		function fillChain(u) {
 			chainIn.value = u;
 			if (fillFields(u)) chainMode = 'fields'; else chainMode = 'link';
 			drawChainMode();
+			chainDD.close();
 			note('已填入，确认无误后点“保存并应用”。', 'info');
 		}
-		var histBox = E('div', { 'class': 'xr-sel' });
-		chainHist.forEach(function(u) {
-			if (u === (cfg.chain || '')) return;
-			var chip = E('span', { 'class': 'xr-sc' }, [
-				E('span', { 'style': 'cursor:pointer', 'title': '填回这个地址', 'click': function() { fillChain(u); } }, chainLabel(u)),
-				E('button', { 'type': 'button', 'title': '不再记住', 'click': function() {
-					sub([ 'chain-forget', u ]).then(function() { if (chip.parentNode) chip.parentNode.removeChild(chip); });
-				} }, '×')
-			]);
-			histBox.appendChild(chip);
-		});
+		var chainDD = dropdown(), chainList = E('div', { 'class': 'xr-ddl' });
+		chainDD.panel.appendChild(chainList);
+		function drawChainHist() {
+			var list = chainHist.slice();
+			if (cfg.chain && list.indexOf(cfg.chain) < 0) list.unshift(cfg.chain);
+			chainDD.txt.textContent = list.length ? '保存过的地址 ' + list.length + ' 条（点一条填回）' : '还没有保存过的地址';
+			while (chainList.firstChild) chainList.removeChild(chainList.firstChild);
+			list.forEach(function(u) {
+				var tg = chainScheme(u), using = u === (cfg.chain || '');
+				chainList.appendChild(E('div', { 'class': 'xr-opt' + (using ? ' cur' : ''), 'title': '填回这个地址', 'click': function() { fillChain(u); } }, [
+					E('span', { 'class': 't ' + tg[0] }, tg[1]),
+					E('span', { 'class': 'n' }, chainLabel(u)),
+					using ? E('span', { 'class': 't on' }, '使用中') : E('button', { 'type': 'button', 'class': 'xr-mini', 'title': '不再记住', 'click': function(ev) {
+						ev.preventDefault(); ev.stopPropagation();
+						sub([ 'chain-forget', u ]).then(function() { chainHist = chainHist.filter(function(x) { return x !== u; }); drawChainHist(); });
+					} }, '×')
+				]));
+			});
+			if (!list.length) chainList.appendChild(E('div', { 'class': 'xr-empty' }, '保存并应用过的地址会出现在这里。'));
+		}
 
 		/* ------------ summaries shown next to each section title ------------ */
 		function drawHints() {
@@ -880,7 +982,7 @@ return view.extend({
 			hSplit.textContent = (nd ? '直连 ' + nd : '') + (nd && np ? ' · ' : '') + (np ? '代理 ' + np : '') || '无';
 		}
 
-		drawStatus(); drawMode(); drawScope(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); drawChainMode(); drawNodeMode(); drawHealth(); drawSubInfo(); drawExc(); drawHints();
+		drawStatus(); drawMode(); drawScope(); drawNodeBtn(); drawProvs(); drawRegions(); drawNodes(); drawChainMode(); drawNodeMode(); drawHealth(); drawSubInfo(); drawExc(); drawChainHist(); drawHints();
 
 		var pollN = 0, devSig = JSON.stringify(devs);
 		poll.add(function() {
@@ -933,7 +1035,7 @@ return view.extend({
 			])),
 
 			section('分流例外', hSplit, E('div', {}, [
-				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。在下面输入一个域名（如 example.com，子域名一并生效）或 IPv4 地址 / 网段，点按钮加入。已经生效的在下拉列表里，点 × 删除：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。在下面输入一个域名（如 example.com 或 百度.com，子域名一并生效）或 IPv4 地址 / 网段，点按钮加入。已经生效的在下拉列表里，点 × 删除：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
 				E('div', { 'class': 'xr-row xr-inline' }, [ excIn, addDirectBtn, addProxyBtn ]),
 					E('div', { 'class': 'xr-lab' }, '已生效的规则'), excDD.root
 			])),
@@ -942,8 +1044,8 @@ return view.extend({
 				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 10px' }, '留空：流量直接从所选节点出去。填写后：所选节点作为前置，流量再经过这个代理出去，网站看到的是它的 IP（比如家宽出口）。'),
 				E('div', { 'class': 'xr-seg' }, [ mFields, mLink ]),
 				chainForm, chainLink,
-				histBox.firstChild ? E('div', { 'class': 'xr-lab' }, '以前填过的（点一下填回，不会自动生效）') : '',
-				histBox,
+				E('div', { 'class': 'xr-lab' }, '保存过的地址'),
+				chainDD.root,
 				E('div', { 'class': 'xr-row', 'style': 'margin-top:12px' }, [ chainTestBtn, chainSaveBtn, chainClearBtn ]),
 				chainOut,
 				E('p', { 'class': 'xr-tip' }, '注意：①前置节点要能访问这个代理的地址，有些家宽代理只允许白名单 IP；②多一跳会更慢；③链式代理失效时，国外流量会直接不通，不会自动回退到所选节点；④账号密码保存在路由器里，页面上默认隐藏；⑤只支持 TCP。')
