@@ -419,7 +419,7 @@ chain-test-start)
 	avail=$(free -k | awk 'NR==2{print $NF}')
 	[ "${avail:-0}" -ge 14000 ] || { echo "not enough free memory (${avail} KB, need 14000 KB); try again in a moment"; exit 1; }
 	: > /tmp/chain-test.out
-	( /usr/bin/xray-sub chain-test-run "${2:-$(cfg chain)}" >>/tmp/chain-test.out 2>&1 </dev/null & )
+	start-stop-daemon -S -b -m -p /tmp/xray-chain-test.pid -x /usr/bin/xray-sub -O /tmp/chain-test.out -- chain-test-run "${2:-$(cfg chain)}" || { echo "failed to start test"; exit 1; }
 	echo started
 	;;
 chain-test-run)
