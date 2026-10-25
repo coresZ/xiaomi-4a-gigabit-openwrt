@@ -17,6 +17,7 @@ var CSS = [
 	'.ag-title{font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}',
 	'.ag-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}',
 	'.ag-row>.ag-field{flex:1 1 180px;min-width:0;width:auto}',
+	'.ag-domains{min-height:96px;resize:vertical;line-height:1.5}',
 	'.ag-btn{min-height:38px;border:1px solid var(--ag-line);border-radius:8px;padding:5px 14px;background:transparent;color:inherit;font-size:14px;cursor:pointer}',
 	'.ag-btn.pri{background:var(--ag-a);border-color:var(--ag-a);color:#fff}',
 	'.ag-btn[disabled]{opacity:.45;cursor:wait}',
@@ -42,6 +43,19 @@ var CSS = [
 	'.ag summary{cursor:pointer;list-style:none;font-size:15px;font-weight:700;min-height:30px}',
 	'.ag summary::-webkit-details-marker{display:none}',
 	'.ag details[open]>summary{margin-bottom:10px}',
+	'.ag-rules>summary{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:42px;padding:8px 10px;border:1px solid var(--ag-line);border-radius:8px;font-size:14px}',
+	'.ag-rules>summary:after{content:"";width:7px;height:7px;flex:0 0 auto;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);opacity:.6}',
+	'.ag-rules[open]>summary:after{transform:rotate(-135deg)}',
+	'.ag-rule-stats{flex:1;min-width:160px;text-align:right;font-size:11.5px;font-weight:400;opacity:.75;word-break:keep-all}',
+	'.ag-rule-panel{padding:8px;border:1px solid var(--ag-line);border-radius:8px}',
+	'.ag-rule-controls{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}.ag-rule-controls>.ag-field{flex:1 1 160px;width:auto;min-width:0}',
+	'.ag-source-dd{flex:1 1 220px;min-width:0}.ag-source-dd>summary{display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:40px;border:1px solid var(--ag-line);border-radius:8px;font-size:14px;font-weight:400}',
+	'.ag-source-dd>summary:after{content:"▾";margin-left:auto;opacity:.6}.ag-source-dd[open]>summary:after{content:"▴"}',
+	'.ag-source-options{max-height:240px;overflow:auto;border:1px solid var(--ag-line);border-radius:8px}',
+	'.ag-source-option{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--ag-line)}.ag-source-option:last-child{border-bottom:0}.ag-source-option.cur{background:rgba(91,124,255,.12)}',
+	'.ag-source-name{flex:1;min-width:0}.ag-source-num{font-size:12px;opacity:.7}',
+	'.ag-tag.builtin{background:#2563eb}.ag-tag.feed{background:#d97706}.ag-tag.local{background:#7c3aed}',
+	'.ag-pager{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px}',
 	'.ag input[type=checkbox]{flex:0 0 auto;width:17px;height:17px;margin:0}',
 	'@media(max-width:640px){.ag{padding-top:40px}.ag-row .ag-btn{flex:1 1 auto}}'
 ].join('\n');
@@ -54,6 +68,7 @@ function kv(t) {
 function message(code) {
 	var messages = { disabled: '已关闭', enabled: '已开启', not_applied: '规则还未加载，请重新开启', busy: '另一个操作正在执行，请稍后再试',
 		low_memory: '可用内存不足，保留原规则；请稍后重试', invalid_domain: '域名格式不正确', invalid_type: '规则类型不正确',
+		invalid_source: '规则来源不正确', invalid_query: '搜索内容格式不正确', invalid_page: '页码不正确',
 		batch_limit: '一次最多加入 60 条', manual_limit: '手动规则最多 256 条', rules_or_syntax: '规则超出上限或配置校验未通过，保留原规则',
 		dns_apply_failed: 'DNS 配置应用失败，已尝试恢复旧配置', persist_failed: '规则保存失败，已尝试恢复旧规则', config_failed: '配置保存失败',
 		cron_failed: '定时任务设置失败', download_failed: '下载超时、网络错误或规则源超过大小上限，保留旧规则', download_size: '规则源大小不符合限制，保留旧规则',
@@ -87,13 +102,32 @@ return view.extend({
 	load: function() { return Promise.all([ call([ 'status' ]), call([ 'lists' ]) ]); },
 	render: function(data) {
 		var st = kv(data[0]), rows = [], busy = false, refreshing = null, scanItems = [], scanning = false, scanned = false, updateWaiting = false;
+		var ruleSource = 'all', rulePage = 1, rulePages = 1, ruleTotal = 0, ruleSeq = 0, ruleTimer = null, sourceCounts = null;
+		var sources = [ [ 'all', '全部来源', '', '全部' ], [ 'builtin', '内置规则', 'builtin', '内置' ], [ 'feed', '订阅规则（AdAway）', 'feed', '订阅' ], [ 'block', '本地拦截（含分析加入）', 'local', '本地' ], [ 'allow', '白名单', 'allow', '放行' ] ];
 		var state = E('div', { 'class': 'ag-pills' }), statusNote = E('div', { 'class': 'ag-note muted' });
 		var list = E('div', { 'class': 'ag-list' }), ruleNote = E('div', { 'class': 'ag-note' });
 		var scanList = E('div', { 'class': 'ag-list' }), scanNote = E('div', { 'class': 'ag-note muted', 'aria-live': 'polite' });
 		var scanSummary = E('div', { 'class': 'ag-note muted', 'aria-live': 'polite' }), updateNote = E('div', { 'class': 'ag-note muted', 'aria-live': 'polite' });
-		var domainIn = E('input', { 'class': 'ag-field', 'placeholder': '域名或网址，例如 example.com', 'autocomplete': 'off', 'spellcheck': 'false', 'aria-label': '规则域名' });
+		var domainIn = E('textarea', { 'class': 'ag-field ag-domains', 'rows': 4, 'placeholder': '每行一个域名或网址，例如：\nexample.com\n百度.com', 'spellcheck': 'false', 'aria-label': '规则域名' });
 		var scanIn = E('input', { 'class': 'ag-field', 'placeholder': '你刚浏览的网站，例如 youtube.com', 'autocomplete': 'off', 'spellcheck': 'false', 'aria-label': '分析网站域名' });
-		var filter = E('input', { 'class': 'ag-field', 'placeholder': '搜索手动规则', 'aria-label': '搜索手动规则', 'input': function() { drawList(); } });
+		var filter = E('input', { 'class': 'ag-field', 'placeholder': '搜索全部规则的域名', 'aria-label': '搜索规则', 'input': function() {
+			window.clearTimeout(ruleTimer); ruleSeq++;
+			ruleTimer = window.setTimeout(function() { rulePage = 1; loadRulePage().catch(function() {}); }, 300);
+		} });
+		var sourceText = E('span'), sourceOptions = E('div', { 'class': 'ag-source-options' });
+		var sourceDropdown = E('details', { 'class': 'ag-source-dd' }, [ E('summary', {}, sourceText), sourceOptions ]);
+		var ruleTitle = E('span', {}, '已有规则'), ruleStats = E('span', { 'class': 'ag-rule-stats' });
+		var pageText = E('span'), prevPage = E('button', { 'type': 'button', 'class': 'ag-mini', 'click': function() { if (rulePage > 1) { rulePage--; loadRulePage().catch(function() {}); } } }, '上一页');
+		var nextPage = E('button', { 'type': 'button', 'class': 'ag-mini', 'click': function() { if (rulePage < rulePages) { rulePage++; loadRulePage().catch(function() {}); } } }, '下一页');
+		var ruleDropdown = E('details', { 'class': 'ag-rules', 'toggle': function() {
+			if (ruleDropdown.open) loadRulePage().catch(function() {});
+			else { window.clearTimeout(ruleTimer); ruleSeq++; }
+		} }, [
+			E('summary', {}, [ ruleTitle, ruleStats ]),
+			E('div', { 'class': 'ag-rule-panel' }, [ E('div', { 'class': 'ag-rule-controls' }, [ sourceDropdown, filter ]), list,
+				E('div', { 'class': 'ag-pager' }, [ prevPage, pageText, nextPage ]),
+				E('p', { 'class': 'muted' }, '可按来源查看全部规则，每页 40 项，不一次加载几千条。内置/订阅规则可用白名单放行；× 只删除本地规则。各来源可能重叠，生效条数以服务状态为准。') ])
+		]);
 		var popup;
 		function note(msg, danger) {
 			if (popup && popup.parentNode) popup.parentNode.removeChild(popup);
@@ -101,6 +135,7 @@ return view.extend({
 			document.body.appendChild(popup);
 		}
 		function parseRows(t) {
+			sourceCounts = null;
 			rows = String(t || '').split('\n').map(function(l) { return l.split('\t'); }).filter(function(r) { return (r[0] === 'block' || r[0] === 'allow') && r[1]; });
 		}
 		function pill(text, on) { return E('span', { 'class': 'ag-pill' }, [ E('span', { 'class': 'ag-dot' + (on ? ' on' : '') }), text ]); }
@@ -113,6 +148,7 @@ return view.extend({
 			statusNote.textContent = '规则上次更新：' + time(st.last_update) + (st.message ? '；' + message(st.message) : '');
 			toggle.textContent = st.enabled === '1' ? '关闭拦截' : '开启拦截';
 			update.disabled = busy || st.busy === '1';
+			drawRuleCounts();
 		}
 		function refreshScanStates() {
 			var items = scanItems;
@@ -136,8 +172,8 @@ return view.extend({
 		function refresh() {
 			if (refreshing) return refreshing;
 			refreshing = Promise.all([ call([ 'status' ]), call([ 'lists' ]) ]).then(function(r) {
-				st = kv(r[0]); parseRows(r[1]); drawStatus(); drawList();
-				return refreshScanStates();
+				st = kv(r[0]); parseRows(r[1]); drawStatus();
+				return Promise.all([ drawList(), refreshScanStates() ]);
 			}).finally(function() { refreshing = null; });
 			return refreshing;
 		}
@@ -157,22 +193,91 @@ return view.extend({
 			}).catch(function(e) { feedback(target, '失败：' + e.message, true); return false; })
 			.finally(function() { busy = false; toggle.disabled = false; scan.disabled = scanning; drawStatus(); drawScan(); });
 		}
-		function drawList() {
-			while (list.firstChild) list.removeChild(list.firstChild);
-			var q = filter.value.trim().toLowerCase(), visible = rows.filter(function(r) { return !q || r[1].indexOf(q) >= 0; });
-			visible.forEach(function(r) {
-				list.appendChild(E('div', { 'class': 'ag-item' }, [
-					E('span', { 'class': 'ag-tag ' + r[0] }, r[0] === 'block' ? '拦截' : '白名单'),
-					E('span', { 'class': 'ag-name' }, r[1]),
-					E('button', { 'type': 'button', 'class': 'ag-mini', 'title': '删除 ' + r[1], 'click': function() { act([ 'remove', r[0], r[1] ], '已删除手动规则。规则源内的域名如需放行，请加入白名单。', ruleNote); } }, '×')
-				]));
+		function ruleCounts() {
+			var blocks = rows.filter(function(r) { return r[0] === 'block'; }).length;
+			var c = { builtin: +st.builtin_rules || 0, feed: +st.feed_rules || 0,
+				block: sourceCounts ? sourceCounts.block : blocks, allow: sourceCounts ? sourceCounts.allow : rows.length - blocks };
+			c.all = c.builtin + c.feed + c.block + c.allow;
+			return c;
+		}
+		function drawSources() {
+			var counts = ruleCounts();
+			while (sourceOptions.firstChild) sourceOptions.removeChild(sourceOptions.firstChild);
+			sources.forEach(function(s) {
+				if (s[0] === ruleSource) sourceText.textContent = s[1] + '（' + counts[s[0]] + ' 项）';
+				var cb = E('input', { 'type': 'checkbox', 'aria-label': '来源 ' + s[1], 'change': function() {
+					ruleSource = s[0]; rulePage = 1; sourceDropdown.open = false; drawSources(); loadRulePage().catch(function() {});
+				} });
+				cb.checked = s[0] === ruleSource;
+				sourceOptions.appendChild(E('label', { 'class': 'ag-source-option' + (cb.checked ? ' cur' : '') }, [ cb,
+					E('span', { 'class': 'ag-tag ' + s[2] }, s[3]), E('span', { 'class': 'ag-source-name' }, s[1]),
+					E('span', { 'class': 'ag-source-num' }, counts[s[0]] + ' 项') ]));
 			});
-			if (!visible.length) list.appendChild(E('div', { 'class': 'ag-empty' }, rows.length ? '没有匹配规则。' : '还没有手动规则。内置和订阅规则不在这里展开，以减少内存占用。'));
+		}
+		function drawRuleCounts() {
+			var c = ruleCounts();
+			ruleTitle.textContent = '已有规则（' + c.all + ' 项）';
+			ruleStats.textContent = '内置 ' + c.builtin + ' · 订阅 ' + c.feed + ' · 本地 ' + c.block + ' · 白名单 ' + c.allow;
+			drawSources();
+		}
+		function removeRule(kind, domain) {
+			if (!window.confirm('确认删除这条' + (kind === 'allow' ? '白名单' : '拦截') + '规则？\n' + domain + '\n删除后将重新按剩余规则判断。')) return;
+			act([ 'remove', kind, domain ], '已删除本地规则。规则源内的域名如需放行，请加入白名单。', ruleNote);
+		}
+		function drawRuleRecords(records) {
+			while (list.firstChild) list.removeChild(list.firstChild);
+			var tags = { builtin: [ 'builtin', '内置' ], feed: [ 'feed', '订阅' ], block: [ 'local', '本地' ], allow: [ 'allow', '白名单' ] };
+			records.forEach(function(r) {
+				var t = tags[r.source], local = r.source === 'block' || r.source === 'allow';
+				if (!t) return;
+				var action = local ? E('button', { 'type': 'button', 'class': 'ag-mini', 'title': '删除 ' + r.domain, 'click': function() { removeRule(r.kind, r.domain); } }, '×') :
+					E('button', { 'type': 'button', 'class': 'ag-mini', 'title': '放行 ' + r.domain, 'click': function() { act([ 'add', 'allow', r.domain ], '已将 ' + r.domain + ' 加入白名单。', ruleNote); } }, '放行');
+				list.appendChild(E('div', { 'class': 'ag-item', 'data-rule-source': r.source }, [ E('span', { 'class': 'ag-tag ' + t[0] }, t[1]), E('span', { 'class': 'ag-name' }, r.domain), action ]));
+			});
+			if (!records.length) list.appendChild(E('div', { 'class': 'ag-empty' }, '这个来源下没有匹配的规则。'));
+			pageText.textContent = '共 ' + ruleTotal + ' 项 · 第 ' + rulePage + ' / ' + rulePages + ' 页';
+			prevPage.disabled = rulePage <= 1; nextPage.disabled = rulePage >= rulePages;
+		}
+		function loadRulePage() {
+			if (!ruleDropdown.open) return Promise.resolve();
+			var seq = ++ruleSeq, q = filter.value.trim().toLowerCase().replace(/[。．]/g, '.');
+			try {
+				if (q && (/[^\x00-\x7f]/.test(q) || q.indexOf('://') >= 0)) q = new URL(q.indexOf('://') >= 0 ? q : 'https://' + q).hostname.toLowerCase();
+				if (q.length > 253 || !/^[a-z0-9.-]*$/.test(q)) throw new Error('请用域名或域名中的关键词搜索。');
+			} catch (e) { list.textContent = '搜索格式不正确，请输入域名或关键词。'; return Promise.resolve(); }
+			prevPage.disabled = nextPage.disabled = true;
+			pageText.textContent = '正在读取规则…';
+			return call([ 'rules-list', ruleSource, q, String(rulePage) ]).then(function(txt) {
+				if (seq !== ruleSeq || !ruleDropdown.open) return;
+				var k = kv(txt), records = [];
+				txt.split('\n').forEach(function(l) { var p = l.split('\t'); if (p[0] === 'rule' && p.length >= 4) records.push({ source: p[1], domain: p[2], kind: p[3] }); });
+				rulePage = +k.page || 1; rulePages = +k.pages || 1; ruleTotal = +k.total || 0;
+				st.builtin_rules = k.builtin_rules; st.feed_rules = k.feed_rules;
+				sourceCounts = { block: +k.manual_block_rules || 0, allow: +k.manual_allow_rules || 0 };
+				drawRuleCounts(); drawRuleRecords(records);
+			}).catch(function(e) {
+				if (seq === ruleSeq && ruleDropdown.open) { list.textContent = '读取规则失败：' + e.message; pageText.textContent = '未能读取最新规则'; }
+				throw e;
+			});
+		}
+		function drawList() {
+			drawRuleCounts();
+			return loadRulePage();
 		}
 		function add(kind) {
-			var h;
-			try { h = host(domainIn.value); } catch (e) { ruleNote.textContent = e.message; return; }
-			act([ 'add', kind, h ], '已加入' + (kind === 'allow' ? '白名单' : '拦截列表') + '；设备已有的 DNS 缓存可能需要过一会儿才更新。', ruleNote).then(function(ok) { if (ok) domainIn.value = ''; });
+			var raw = domainIn.value.split(/[\s,;，；]+/).filter(Boolean), domains = [], seen = {}, bad = [];
+			if (!raw.length) { feedback(ruleNote, '请先填写域名，每行一个。', true); return; }
+			raw.forEach(function(t) {
+				try { var h = host(t); if (!seen[h]) { seen[h] = true; domains.push(h); } }
+				catch (e) { bad.push(t); }
+			});
+			if (bad.length) { feedback(ruleNote, '以下内容不是有效域名，本次没有添加：' + bad.slice(0, 5).join('、') + (bad.length > 5 ? ' 等' : '') + '。', true); return; }
+			if (domains.length > 60) { feedback(ruleNote, '一次最多添加 60 个不同域名，本次没有添加。', true); return; }
+			var existing = {};
+			rows.forEach(function(r) { if (r[0] === kind) existing[r[1]] = true; });
+			var fresh = domains.filter(function(d) { return !existing[d]; }), skipped = domains.length - fresh.length;
+			if (!fresh.length) { feedback(ruleNote, '这些域名已在' + (kind === 'allow' ? '白名单' : '手动拦截列表') + '中，没有重复添加。', false); return; }
+			act([ 'batch-add', kind, fresh.join(' ') ], '添加成功：已加入 ' + fresh.length + ' 条' + (kind === 'allow' ? '白名单' : '拦截') + '规则' + (skipped ? '，跳过 ' + skipped + ' 条已有规则' : '') + '。设备已有的 DNS 缓存可能需要过一会儿才更新。', ruleNote).then(function(ok) { if (ok) domainIn.value = ''; });
 		}
 		var toggle = E('button', { 'type': 'button', 'class': 'ag-btn pri', 'click': function() {
 			act([ st.enabled === '1' ? 'disable' : 'enable' ], '设置已生效。', ruleNote);
@@ -256,11 +361,11 @@ return view.extend({
 				E('div', { 'class': 'ag-row', 'style': 'margin-top:8px' }, addScan),
 				E('p', { 'class': 'muted' }, '这不是通过 IP 反查确认归属，也不是完整的网页请求分析。没识别出的域名不会自动拦截，分析结果也不保证属于该网站。') ]),
 			E('div', { 'class': 'ag-card' }, [ E('div', { 'class': 'ag-title' }, '手动规则与白名单'),
-				E('p', { 'class': 'muted' }, '域名规则包含其子域名。白名单优先；误拦导致登录或图片异常时，可把对应域名加入白名单。中文域名会转成 DNS 使用的 ASCII 形式。'),
-				E('div', { 'class': 'ag-row' }, [ domainIn,
+				E('p', { 'class': 'muted' }, '每行一个域名或网址，支持换行、空格和逗号分隔，一次最多 60 个不同域名。规则包含子域名，白名单优先；中文域名会自动转换。'),
+				domainIn, E('div', { 'class': 'ag-row', 'style': 'margin-top:8px' }, [
 					E('button', { 'type': 'button', 'class': 'ag-btn', 'click': function() { add('block'); } }, '加入拦截'),
 					E('button', { 'type': 'button', 'class': 'ag-btn', 'click': function() { add('allow'); } }, '加入白名单') ]),
-				ruleNote, filter, list ])
+				ruleNote, ruleDropdown ])
 		]);
 	}
 });

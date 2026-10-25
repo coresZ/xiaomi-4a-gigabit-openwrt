@@ -219,6 +219,9 @@ status() {
 	[ "$on" = 0 ] || message=enabled
 	[ "$on" = 0 ] || [ "$applied" = 1 ] || message=not_applied
 	printf 'enabled=%s\napplied=%s\nrules=%s\nmemory_available=%s\nlast_update=%s\nbusy=%s\nmessage=%s\n' "$on" "$applied" "$rules" "$(mem_available)" "${stamp:-0}" "$busy" "$message"
+	local feed_count=0
+	[ ! -f "$BASE/feed" ] || feed_count=$(awk 'NF && $0 !~ /^#/ { n++ } END { print n+0 }' "$BASE/feed")
+	printf 'builtin_rules=%s\nfeed_rules=%s\n' "$(builtin | wc -l)" "$feed_count"
 }
 list_rules() {
 	local type d
@@ -426,14 +429,52 @@ check_domains() {
 	   }
 	 }' "$allow" "$block" "$runtime"
 }
+rule_page() {
+	local source=$1 query=$2 page=$3
+	case "$source" in all|builtin|feed|block|allow) ;; *) fail invalid_source; return 1;; esac
+	case "$query" in *[!a-zA-Z0-9.-]*) fail invalid_query; return 1;; esac
+	[ ${#query} -le 253 ] || { fail invalid_query; return 1; }
+	case "$page" in ''|*[!0-9]*) fail invalid_page; return 1;; esac
+	[ ${#page} -le 4 ] && [ "$page" -ge 1 ] || { fail invalid_page; return 1; }
+	query=$(canonical "$query")
+	{
+		[ ! -f "$BASE/block" ] || awk 'NF {print "block\t" $0}' "$BASE/block"
+		[ ! -f "$BASE/allow" ] || awk 'NF {print "allow\t" $0}' "$BASE/allow"
+		builtin | awk 'NF {print "builtin\t" $0}'
+		[ ! -f "$BASE/feed" ] || awk 'NF && $0 !~ /^#/ {print "feed\t" $0}' "$BASE/feed"
+	} | awk -F '\t' -v source="$source" -v query="$query" -v page="$page" '
+	 BEGIN { size=40; start=(page-1)*size+1; stop=page*size }
+	 NF==2 {
+	   counts[$1]++
+	   if(source!="all" && $1!=source) next
+	   if(query!="" && !index($2,query)) next
+	   total++; last[total%size]=$0
+	   if(total>=start && total<=stop) wanted[total]=$0
+	 }
+	 END {
+	   pages=int((total+size-1)/size); if(pages<1) pages=1
+	   actual=(page>pages ? pages : page)
+	   print "source=" source; print "page=" actual; print "pages=" pages
+	   print "total=" total+0; print "page_size=" size
+	   print "builtin_rules=" counts["builtin"]+0; print "feed_rules=" counts["feed"]+0
+	   print "manual_block_rules=" counts["block"]+0; print "manual_allow_rules=" counts["allow"]+0
+	   from=(actual-1)*size+1; to=actual*size; if(to>total) to=total
+	   for(i=from;i<=to;i++) {
+	     row=(actual==page ? wanted[i] : last[i%size]); split(row,p,"\t")
+	     print "rule\t" p[1] "\t" p[2] "\t" (p[1]=="allow" ? "allow" : "block")
+	   }
+	 }'
+}
 case "$1" in
 	add|remove|batch-add) expected=3;;
+	rules-list) expected=4;;
 	check|checks) expected=2;;
 	*) expected=1;;
 esac
 [ "$#" = "$expected" ] || { fail invalid_arguments; exit 1; }
 case "$1" in
 	status) [ "$#" = 1 ] && status;;
+	rules-list) rule_page "$2" "$3" "$4";;
 	lists) [ "$#" = 1 ] && list_rules;;
 	check) [ "$#" = 2 ] && check_domain "$2";;
 	checks) [ "$#" = 2 ] && check_domains "$2";;

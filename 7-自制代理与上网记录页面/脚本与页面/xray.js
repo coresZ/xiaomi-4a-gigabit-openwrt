@@ -37,6 +37,7 @@ var CSS = [
 	/* controls */
 	'.xr-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
 	'.xr-field{width:100%;min-height:40px;font-size:15px;padding:6px 12px;border-radius:12px;border:1px solid var(--xr-line);background:rgba(255,255,255,.04);color:inherit}',
+	'.xr-domain-input{min-height:92px;resize:vertical;line-height:1.5}',
 	'.xr-btn{min-height:40px;padding:6px 16px;border-radius:12px;border:1px solid var(--xr-line);background:transparent;color:inherit;font-size:14.5px;cursor:pointer;transition:background .15s,transform .1s}',
 	'.xr-btn:active{transform:scale(.98)}',
 	'.xr-btn.pri{background:linear-gradient(135deg,var(--xr-a),var(--xr-a2));border-color:transparent;color:#fff;font-weight:600}',
@@ -394,7 +395,7 @@ return view.extend({
 			/* what is selected, shown as removable chips under the dropdown */
 			while (devChips.firstChild) devChips.removeChild(devChips.firstChild);
 			function chip(label, remove) {
-				devChips.appendChild(E('span', { 'class': 'xr-sc' }, [ E('span', {}, label), E('button', { 'type': 'button', 'title': '取消选择', 'click': function() { remove(); drawDevs(); drawHints(); } }, '×') ]));
+				devChips.appendChild(E('span', { 'class': 'xr-sc' }, [ E('span', {}, label), E('button', { 'type': 'button', 'title': '取消选择', 'click': function() { if (!window.confirm('确认从已选设备中移除？\n' + label + '\n仅取消这次选择，保存并应用后生效。')) return; remove(); drawDevs(); drawHints(); } }, '×') ]));
 			}
 			devs.forEach(function(dv) { if (isSel(dv)) chip(devLabel(dv), function() { delete sel[dv.mac]; delete sel[dv.ip]; }); });
 			Object.keys(sel).forEach(function(k) { if (!known[k]) chip(k, function() { delete sel[k]; }); });
@@ -733,15 +734,17 @@ return view.extend({
 			return { direct_domains: (cfg.direct_domains || '').split(' ').filter(Boolean), direct_ips: (cfg.direct_ips || '').split(' ').filter(Boolean), proxy_domains: (cfg.proxy_domains || '').split(' ').filter(Boolean), proxy_ips: (cfg.proxy_ips || '').split(' ').filter(Boolean) };
 		}
 		function removeExc(it) {
+			if (!window.confirm('确认删除这条分流例外？\n' + showHost(it.v) + '\n删除后将恢复按其他规则分流。')) return;
 			var L = excLists(), key = (it.kind === 'direct' ? 'direct_' : 'proxy_') + (it.ip ? 'ips' : 'domains');
 			L[key] = L[key].filter(function(v) { return v !== it.v; });
 			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
 			commitExc('已删除 ' + it.v + (st.run ? '，之后新建的连接生效。' : '，代理开启后生效。'));
 		}
-		var excIn = E('input', { 'class': 'xr-field', 'type': 'text', 'placeholder': '域名或 IP，如 example.com、百度.com', 'autocomplete': 'off', 'spellcheck': 'false' });
+		var excIn = E('textarea', { 'class': 'xr-field xr-domain-input', 'rows': 4, 'placeholder': '每行一个域名或 IP，例如：\nexample.com\n百度.com\n1.2.3.0/24', 'spellcheck': 'false', 'aria-label': '分流例外域名或 IP' });
 		function addExc(kind) {
 			var raw = excIn.value.split(/[\s,;，；]+/).filter(Boolean);
 			if (!raw.length) { note('请先输入域名或 IP。', 'danger'); return; }
+			if (raw.length > 300) { note('一次最多添加 300 项，本次没有添加。', 'danger'); return; }
 			var bad = [], items = [];
 			raw.forEach(function(t) { var d = hostToken(t); if (!d) bad.push(t); else items.push(d); });
 			if (bad.length) { note('没法加入：' + bad.join('、') + '。请填域名（可以是中文，如 百度.com）或 IPv4 地址 / 网段。', 'danger'); return; }
@@ -752,6 +755,8 @@ return view.extend({
 				var i = other.indexOf(d.v); if (i >= 0) other.splice(i, 1);
 				if (mine.indexOf(d.v) < 0) mine.push(d.v);
 			});
+			var tooMany = Object.keys(L).some(function(k) { return L[k].length > 300; });
+			if (tooMany) { note('同一类规则最多保存 300 条，本次没有添加。', 'danger'); return; }
 			Object.keys(L).forEach(function(k) { cfg[k] = L[k].join(' '); });
 			excIn.value = '';
 			commitExc('已加入' + (kind === 'direct' ? '强制直连' : '强制走代理') + (st.run ? '，之后新建的连接生效。' : '，代理开启后生效。'));
@@ -963,6 +968,7 @@ return view.extend({
 					E('span', { 'class': 'n' }, chainLabel(u)),
 					using ? E('span', { 'class': 't on' }, '使用中') : E('button', { 'type': 'button', 'class': 'xr-mini', 'title': '不再记住', 'click': function(ev) {
 						ev.preventDefault(); ev.stopPropagation();
+						if (!window.confirm('确认删除这条链式代理历史？\n' + chainLabel(u) + '\n只删除保存的历史地址，不修改正在使用的代理。')) return;
 						sub([ 'chain-forget', u ]).then(function() { chainHist = chainHist.filter(function(x) { return x !== u; }); drawChainHist(); });
 					} }, '×')
 				]));
@@ -1035,8 +1041,8 @@ return view.extend({
 			])),
 
 			section('分流例外', hSplit, E('div', {}, [
-				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。在下面输入一个域名（如 example.com 或 百度.com，子域名一并生效）或 IPv4 地址 / 网段，点按钮加入。已经生效的在下拉列表里，点 × 删除：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
-				E('div', { 'class': 'xr-row xr-inline' }, [ excIn, addDirectBtn, addProxyBtn ]),
+				E('p', { 'class': 'xr-tip', 'style': 'margin:0 0 8px' }, '默认是“国内 IP 直连，其余走代理”。在下面输入域名（如 example.com 或 百度.com，包含子域名）或 IPv4 地址 / 网段，每行一个，可批量加入。已经生效的在下拉列表里，点 × 删除：强制走代理的优先于强制直连的，两者都优先于国内 IP 表。只对走代理的设备生效，不影响已经建立的连接。域名由路由器解析成地址再写进规则，每 5 分钟更新一次，也会参考设备解析过的结果（需要开启“上网记录”的访问记录）；用自带 DNS 的 App 可能解析到别的地址，那部分不受影响。更方便的做法：在“上网记录”里点开设备，在某条网站记录下面直接点“强制走代理 / 强制直连”。'),
+				E('div', {}, [ excIn, E('div', { 'class': 'xr-row', 'style': 'margin-top:8px' }, [ addDirectBtn, addProxyBtn ]) ]),
 					E('div', { 'class': 'xr-lab' }, '已生效的规则'), excDD.root
 			])),
 
