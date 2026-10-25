@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# One-shot procd service: rehydrate RAM rules, never fetch during boot.
+USE_PROCD=1
+START=96
+STOP=10
+
+start_service() {
+	/usr/bin/adguard-lite apply
+}
+
+reload_service() {
+	/usr/bin/adguard-lite apply
+}
+
+service_triggers() {
+	procd_add_reload_trigger adguard-lite
+}

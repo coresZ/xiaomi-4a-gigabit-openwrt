@@ -1,0 +1,44 @@
+#!/bin/sh
+# DNS timing is evidence of co-occurrence, not proof that a website caused a query.
+D=/tmp/adguard-lite-scan
+mkdir -p "$D"
+umask 077
+valid() {
+	[ ${#1} -le 253 ] && printf '%s\n' "$1" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$'
+}
+case "$1" in
+scan)
+	host=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+	valid "$host" || { echo 'error=请输入完整域名，例如 example.com'; exit 1; }
+	[ "$(uci -q get netmon.main.enabled)" = 1 ] && [ "$(uci -q get 'dhcp.@dnsmasq[0].logqueries')" = 1 ] || {
+		echo 'error=请先开启上网记录的访问记录，再用设备浏览目标网站'; exit 1;
+	}
+	[ -s /tmp/netmon/events.tsv ] || { echo 'error=暂时没有访问记录，请先浏览目标网站'; exit 1; }
+	# Cap input and output so a busy LAN cannot grow this operation without bound.
+	tail -n 3000 /tmp/netmon/events.tsv | awk -F '\t' -v host="$host" -v now="$(date +%s)" '
+	function suffix(d, p) { return d == p || (length(d)>length(p) && substr(d,length(d)-length(p),1)=="." && substr(d,length(d)-length(p)+1)==p) }
+	function ad(d, a, n, i) {
+		n=split("doubleclick.net googlesyndication.com googleadservices.com adservice.google.com ads.youtube.com ad.doubleclick.net amazon-adsystem.com adnxs.com adsrvr.org adroll.com criteo.com criteo.net taboola.com outbrain.com pubmatic.com rubiconproject.com openx.net casalemedia.com advertising.com smartadserver.com adform.net media.net scorecardresearch.com doubleverify.com googletagservices.com app-measurement.com ads.pubmatic.com ad-delivery.net adskeeper.com mgid.com adsterra.com popads.net popcash.net propellerads.com exoclick.com trafficjunky.net ad.daum.net cpro.baidu.com pos.baidu.com union.baidu.com hm.baidu.com adukwai.com pangolin-sdk-toutiao.com byteadance.com ad.xiaomi.com ads.mopub.com adcolony.com unityads.unity3d.com applovin.com applvn.com vungle.com irs01.com umeng.com",a," ");
+		for(i=1;i<=n;i++) if(suffix(d,a[i])) return a[i];
+		return "";
+	}
+	NF>=3 && $1+0>=now-900 && $1+0<=now+5 {
+		++n; ts[n]=$1+0; ip[n]=$2; name[n]=tolower($3);
+		if(suffix(name[n],host)) { hits++; if(tn<80) { ++tn; tt[tn]=ts[n]; ti[tn]=ip[n] } }
+	}
+	END {
+		print "target=" host; print "target_queries=" hits;
+		for(i=1;i<=n;i++) {
+			p=ad(name[i]); if(p=="" || suffix(host,p)) continue;
+			for(j=1;j<=tn;j++) if(ip[i]==ti[j] && ts[i]>=tt[j]-5 && ts[i]<=tt[j]+45) {
+				if(!(name[i] in count) && unique>=60) break;
+				if(!(name[i] in count)) unique++;
+				count[name[i]]++; clients[name[i]]=ip[i]; parents[name[i]]=p; break;
+			}
+		}
+		for(d in count) print "candidate\t" d "\t" count[d] "\t" clients[d] "\t" parents[d];
+		print "candidates=" unique+0;
+	}'
+	;;
+*) echo 'error=unknown command'; exit 1 ;;
+esac

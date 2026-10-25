@@ -1,0 +1,7 @@
+{
+  "luci-app-adguard-lite": {
+    "description": "Manage lightweight dnsmasq domain blocking",
+    "read": { "file": { "/usr/bin/adguard-lite": [ "exec" ], "/usr/bin/adguard-lite-scan": [ "exec" ] } },
+    "write": { "file": { "/usr/bin/adguard-lite": [ "exec" ], "/usr/bin/adguard-lite-scan": [ "exec" ] } }
+  }
+}

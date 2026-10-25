@@ -1,0 +1,448 @@
+#!/bin/sh
+# BusyBox ash; no resident process. Only our conf-dir file is owned here.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH LC_ALL=C
+umask 077
+BASE=/etc/adguard-lite
+RUN=/tmp/adguard-lite
+LOCK=/tmp/adguard-lite.lock
+PID=/tmp/adguard-lite-job.pid
+JOB=/tmp/adguard-lite-job.state
+SELF=/usr/bin/adguard-lite
+MAX_RULES=4000
+MAX_MANUAL=256
+MAX_FEED=102400
+WORK= TX=0 LOCKED=0 JOB_OWNER=0
+
+say() { printf '%s\n' "$*"; }
+fail() {
+	[ "$JOB_OWNER" = 0 ] || job_state idle error "$1"
+	say 'result=error'; say "message=$1"; return 1
+}
+enabled() { [ "$(uci -q get adguard-lite.main.enabled)" = 1 ]; }
+mem_available() { awk '/^MemAvailable:/ { print $2; found=1; exit } END { if (!found) print 0 }' /proc/meminfo; }
+valid_domain() {
+	[ ${#1} -le 253 ] && [ -n "$1" ] || return 1
+	case "$1" in *[!a-z0-9.-]*) return 1;; esac
+	# Deliberately ASCII only; the frontend must convert Unicode to IDNA.
+	printf '%s\n' "$1" | awk '
+	 /^[a-z0-9.-]+$/ && /\./ && $0 !~ /^[0-9.]+$/ {
+	   n=split($0,a,"."); for(i=1;i<=n;i++)
+	     if(length(a[i])<1 || length(a[i])>63 || a[i] !~ /^[a-z0-9]/ || a[i] !~ /[a-z0-9]$/) exit 1
+	   exit 0
+	 } { exit 1 }'
+}
+canonical() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+job_alive() {
+	local p
+	p=$(cat "$PID" 2>/dev/null)
+	case "$p" in ''|*[!0-9]*) return 1;; esac
+	kill -0 "$p" 2>/dev/null || return 1
+	# Do not mistake a reused PID for this job.
+	tr '\000' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q '/usr/bin/adguard-lite update-run'
+}
+lock_owner_alive() {
+	local p birth current dir=${1:-$LOCK}
+	p=$(cat "$dir/pid" 2>/dev/null)
+	case "$p" in ''|*[!0-9]*) return 1;; esac
+	kill -0 "$p" 2>/dev/null || return 1
+	birth=$(cat "$dir/start" 2>/dev/null)
+	current=$(awk '{print $22}' "/proc/$p/stat" 2>/dev/null)
+	[ -n "$birth" ] && [ "$birth" = "$current" ]
+}
+reap_lock() {
+	# Only one stale-lock reaper, and recheck after taking the reaper guard.
+	if ! mkdir "$LOCK/reap" 2>/dev/null; then
+		if ! lock_owner_alive "$LOCK/reap"; then
+			sleep 1
+			lock_owner_alive "$LOCK/reap" || rm -rf "$LOCK/reap"
+		fi
+		return 1
+	fi
+	awk '{print $22}' "/proc/$$/stat" > "$LOCK/reap/start"
+	printf '%s\n' "$$" > "$LOCK/reap/pid"
+	if lock_owner_alive; then rm -rf "$LOCK/reap"; return 1; fi
+	rm -rf "$LOCK"
+}
+lock() {
+	local n=0 missing=0
+	while ! mkdir "$LOCK" 2>/dev/null; do
+		if lock_owner_alive; then
+			missing=0
+		else
+			missing=$((missing + 1))
+			# Also give a mkdir winner time to publish its PID and birth token.
+			if [ "$missing" -ge 3 ]; then reap_lock; missing=0; fi
+		fi
+		n=$((n + 1)); [ "$n" -lt 10 ] || return 1
+		sleep 1
+	done
+	awk '{print $22}' "/proc/$$/stat" > "$LOCK/start"
+	printf '%s\n' "$$" > "$LOCK/pid"
+	LOCKED=1
+	mkdir -p "$RUN" || return 1
+	WORK="$RUN/work.$$"
+	mkdir "$WORK" || return 1
+}
+job_state() {
+	printf 'state=%s\nresult=%s\nmessage=%s\n' "$1" "$2" "$3" > "$JOB.$$" && mv -f "$JOB.$$" "$JOB"
+}
+# The actual OpenWrt init treats confdir as ONE scalar, not a UCI list.
+# Use the existing directory (also mounted by the dnsmasq procd jail).
+find_snippet() {
+	local cfg dir
+	cfg=$(uci -q show 'dhcp.@dnsmasq[0]' | sed -n '1s/^dhcp\.\([^=]*\)=dnsmasq$/\1/p')
+	case "$cfg" in ''|*[!a-zA-Z0-9_]*) return 1;; esac
+	CONF="/var/etc/dnsmasq.conf.$cfg"
+	dir=$(sed -n 's/^conf-dir=//p' "$CONF" 2>/dev/null)
+	if [ -z "$dir" ]; then
+		dir=$(uci -q get 'dhcp.@dnsmasq[0].confdir')
+		[ -n "$dir" ] || dir="/tmp/dnsmasq.$cfg.d"
+	fi
+	# Reject filters, multiple directories or control characters rather than
+	# silently placing our file somewhere dnsmasq ignores.
+	case "$dir" in /*) ;; *) return 1;; esac
+	case "$dir" in *[!a-zA-Z0-9_./-]*|*/../*|*/..|/) return 1;; esac
+	SNIPPET="$dir/adguard-lite.conf"
+}
+syntax_test() { /usr/sbin/dnsmasq --test -C "$1" > "$WORK/test.log" 2>&1; }
+dns_restart() {
+	local old now n=0
+	old=$(pidof dnsmasq)
+	/usr/bin/timeout -k 1 8 /etc/init.d/dnsmasq restart > "$WORK/restart.log" 2>&1 || return 1
+	while [ "$n" -lt 3 ]; do
+		now=$(pidof dnsmasq)
+		if [ -n "$now" ] && [ "$now" != "$old" ]; then
+			# procd can report success before an immediately failing child exits.
+			sleep 1
+			[ "$(pidof dnsmasq)" = "$now" ] && return 0
+		fi
+		n=$((n + 1)); sleep 1
+	done
+	return 1
+}
+restore_runtime() {
+	[ "$TX" = 1 ] || return 0
+	if [ -f "$WORK/old.conf" ]; then
+		cp "$WORK/old.conf" "${SNIPPET%/*}/.adguard-lite.restore.$$" && mv -f "${SNIPPET%/*}/.adguard-lite.restore.$$" "$SNIPPET" || return 1
+	else
+		rm -f "$SNIPPET" || return 1
+	fi
+	dns_restart || return 1
+	TX=0
+}
+cleanup() {
+	local rc=$?
+	trap - EXIT HUP INT TERM
+	if [ "$TX" = 1 ]; then
+		restore_runtime || { logger -t adguard-lite 'DNS rollback failed; check dnsmasq'; rc=1; }
+	fi
+	[ -z "$SNIPPET" ] || rm -f "${SNIPPET%/*}/.adguard-lite.new.$$" "${SNIPPET%/*}/.adguard-lite.restore.$$"
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	if [ "$LOCKED" = 1 ] && [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$LOCK"; fi
+	if [ "$JOB_OWNER" = 1 ]; then
+		if [ "$rc" != 0 ] && grep -qx 'state=running' "$JOB" 2>/dev/null; then job_state idle error update_failed; fi
+		[ "$(cat "$PID" 2>/dev/null)" != "$$" ] || rm -f "$PID"
+	fi
+	exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+builtin() {
+	printf '%s\n' doubleclick.net googlesyndication.com googleadservices.com adservice.google.com \
+		pagead2.googlesyndication.com googleads.g.doubleclick.net ad.doubleclick.net \
+		pubads.g.doubleclick.net securepubads.g.doubleclick.net ads.mopub.com \
+		ads.adnxs.com ib.adnxs.com ads.pubmatic.com ads.rubiconproject.com \
+		adserver.adtechus.com adserver.adtech.de ads.openx.net ads.scorecardresearch.com \
+		ads.moatads.com pixel.adsafeprotected.com
+}
+# Only a small allow-domain set is retained in awk. Domains are streamed;
+# sort's input is bounded by the persistent feed + 256 manual entries.
+build_rules() {
+	local feed=$1 block=$2 allow=$3
+	{ builtin; [ ! -f "$feed" ] || sed '/^#/d' "$feed"; [ ! -f "$block" ] || cat "$block"; } > "$WORK/domains"
+	[ ! -f "$allow" ] || cp "$allow" "$WORK/allow"
+	: >> "$WORK/allow"
+	awk 'FILENAME==ARGV[1] { a[$0]=1; next }
+	 { d=$0; covered=0; while(d!="") { if(d in a) { covered=1; break } if(!sub(/^[^.]+\./,"",d)) break }
+	   if(!covered) print $0 }' "$WORK/allow" "$WORK/domains" | sort -u > "$WORK/blocks"
+	local count
+	count=$(( $(wc -l < "$WORK/blocks") + $(wc -l < "$WORK/allow") ))
+	[ "$count" -le "$MAX_RULES" ] || return 1
+	{ sed 's|^|server=/|;s|$|/|' "$WORK/blocks"; sed 's|^|server=/|;s|$|/#|' "$WORK/allow"; } > "$WORK/new.conf"
+	# server=/blocked/ refuses upstream forwarding for ALL RR types (NXDOMAIN
+	# absent local hosts/DHCP). More-specific /allowed/# restores normal DNS.
+	syntax_test "$WORK/new.conf"
+}
+apply_runtime() {
+	find_snippet || return 1
+	mkdir -p "${SNIPPET%/*}" || return 1
+	[ ! -f "$SNIPPET" ] || cp "$SNIPPET" "$WORK/old.conf" || return 1
+	TX=1
+	if [ "$1" = off ]; then
+		rm -f "$SNIPPET" || return 1
+	else
+		cp "$WORK/new.conf" "${SNIPPET%/*}/.adguard-lite.new.$$" && mv -f "${SNIPPET%/*}/.adguard-lite.new.$$" "$SNIPPET" || return 1
+	fi
+	# Validate the complete generated config as well when already available.
+	[ ! -f "$CONF" ] || syntax_test "$CONF" || return 1
+	# SIGHUP does NOT reread conf-dir snippets: a real restart is necessary.
+	dns_restart
+}
+commit_enabled() {
+	uci set "adguard-lite.main.enabled=$1" && uci commit adguard-lite
+}
+cron_sync() {
+	local line='23 4 * * * /usr/bin/adguard-lite update-start >/dev/null 2>&1 # adguard-lite'
+	mkdir -p /etc/crontabs || return 1
+	[ ! -f /etc/crontabs/root ] || cat /etc/crontabs/root > "$WORK/cron.old"
+	: >> "$WORK/cron.old"
+	awk '$0 !~ / # adguard-lite$/ { print }' "$WORK/cron.old" > "$WORK/cron"
+	if enabled; then printf '%s\n' "$line" >> "$WORK/cron"; fi
+	if ! cmp -s "$WORK/cron" "$WORK/cron.old"; then
+		cp "$WORK/cron" /etc/crontabs/.adguard-lite.new && mv -f /etc/crontabs/.adguard-lite.new /etc/crontabs/root || return 1
+		/etc/init.d/cron reload >/dev/null 2>&1 || return 1
+	fi
+}
+persist() {
+	# Stage in the destination directory for atomic flash replacement.
+	mkdir -p "$BASE" && cp "$1" "$BASE/.$2.new" && mv -f "$BASE/.$2.new" "$BASE/$2"
+}
+status() {
+	local on=0 applied=0 rules=0 stamp=0 busy=0 message=disabled
+	enabled && on=1
+	if find_snippet && [ -s "$SNIPPET" ] && [ -n "$(pidof dnsmasq)" ]; then
+		applied=1; rules=$(wc -l < "$SNIPPET")
+	fi
+	[ ! -f "$BASE/feed" ] || stamp=$(sed -n '1s/^# updated=\([0-9]*\)$/\1/p' "$BASE/feed")
+	if job_alive || lock_owner_alive; then busy=1; fi
+	[ "$on" = 0 ] || message=enabled
+	[ "$on" = 0 ] || [ "$applied" = 1 ] || message=not_applied
+	printf 'enabled=%s\napplied=%s\nrules=%s\nmemory_available=%s\nlast_update=%s\nbusy=%s\nmessage=%s\n' "$on" "$applied" "$rules" "$(mem_available)" "${stamp:-0}" "$busy" "$message"
+}
+list_rules() {
+	local type d
+	for type in block allow; do
+		[ -f "$BASE/$type" ] || continue
+		while IFS= read -r d; do printf '%s\t%s\n' "$type" "$d"; done < "$BASE/$type"
+	done
+}
+change_rule() {
+	local action=$1 type=$2 domain count d n=0
+	case "$type" in block|allow) ;; *) fail invalid_type; return 1;; esac
+	case "$3" in *[!a-zA-Z0-9.\ -]*) fail invalid_domain; return 1;; esac
+	domain=$(canonical "$3")
+	if [ "$action" = batch-add ]; then
+		[ ${#domain} -le 15240 ] || { fail batch_limit; return 1; }
+		case "$domain" in ''|*[!a-z0-9.\ -]*) fail invalid_domain; return 1;; esac
+		for d in $domain; do
+			n=$((n + 1))
+			[ "$n" -le 60 ] || { fail batch_limit; return 1; }
+			valid_domain "$d" || { fail invalid_domain; return 1; }
+		done
+		[ "$n" -gt 0 ] || { fail invalid_domain; return 1; }
+	else
+		valid_domain "$domain" || { fail invalid_domain; return 1; }
+	fi
+	lock || { fail busy; return 1; }
+	local t
+	for t in block allow; do
+		if [ -f "$BASE/$t" ]; then cp "$BASE/$t" "$WORK/$t" || return 1; else : > "$WORK/$t"; fi
+	done
+	if [ "$action" = add ] || [ "$action" = batch-add ]; then
+		for d in $domain; do
+			grep -qxF "$d" "$WORK/$type" || printf '%s\n' "$d" >> "$WORK/$type"
+		done
+	else
+		grep -vxF "$domain" "$WORK/$type" > "$WORK/changed"; mv -f "$WORK/changed" "$WORK/$type"
+	fi
+	sort -u "$WORK/$type" > "$WORK/sorted" && mv -f "$WORK/sorted" "$WORK/$type" || return 1
+	count=$(( $(wc -l < "$WORK/block") + $(wc -l < "$WORK/allow") ))
+	[ "$count" -le "$MAX_MANUAL" ] || { fail manual_limit; return 1; }
+	if enabled; then
+		[ "$(mem_available)" -ge 8000 ] || { fail low_memory; return 1; }
+		build_rules "$BASE/feed" "$WORK/block" "$WORK/allow" || { fail rules_or_syntax; return 1; }
+		apply_runtime on || { fail dns_apply_failed; return 1; }
+	fi
+	persist "$WORK/$type" "$type" || { fail persist_failed; return 1; }
+	TX=0
+	say ok
+}
+set_enabled() {
+	local target=$1 old=0
+	lock || { fail busy; return 1; }
+	enabled && old=1
+	if [ "$target" = 1 ]; then
+		[ "$(mem_available)" -ge 8000 ] || { fail low_memory; return 1; }
+		build_rules "$BASE/feed" "$BASE/block" "$BASE/allow" || { fail rules_or_syntax; return 1; }
+		apply_runtime on || { fail dns_apply_failed; return 1; }
+	else
+		find_snippet || { fail confdir_unsupported; return 1; }
+		if [ -f "$SNIPPET" ]; then apply_runtime off || { fail dns_apply_failed; return 1; }; fi
+	fi
+	if ! commit_enabled "$target"; then commit_enabled "$old" >/dev/null 2>&1; fail config_failed; return 1; fi
+	if ! cron_sync; then
+		commit_enabled "$old" >/dev/null 2>&1
+		cron_sync >/dev/null 2>&1
+		fail cron_failed; return 1
+	fi
+	TX=0
+	say ok
+}
+update_run() {
+	lock || { fail busy; return 1; }
+	if job_alive && [ "$(cat "$PID" 2>/dev/null)" != "$$" ]; then fail busy; return 1; fi
+	printf '%s\n' "$$" > "$PID"
+	JOB_OWNER=1
+	job_state running ok updating
+	enabled || { fail disabled; return 1; }
+	[ "$(mem_available)" -ge 14000 ] || { fail low_memory; return 1; }
+	# BusyBox ash RLIMIT_FSIZE uses 512-byte blocks: hard 256 KiB file cap.
+	# Timeout bounds the entire TLS/download operation, not just each request.
+	/usr/bin/timeout -k 3 40 /bin/sh -c '
+		ulimit -f 512 || exit 1
+		exec uclient-fetch -4 --no-proxy -q -T 12 -O "$1" https://adaway.org/hosts.txt
+	' sh "$WORK/raw" > "$WORK/fetch.log" 2>&1 || { fail download_failed; return 1; }
+	[ -s "$WORK/raw" ] && [ "$(wc -c < "$WORK/raw")" -le 262144 ] || { fail download_size; return 1; }
+	# Parse hosts format only, reject localhost, IPs, invalid labels and HTML.
+	# No whole-feed associative map; sort receives at most 256 KiB.
+	awk '
+	 function valid(d, n,a,i) {
+	   if(d=="youtube.com" || d=="www.youtube.com" || d=="youtu.be" || d=="ytimg.com" || d=="google.com" || d=="googleapis.com" || d=="gstatic.com" || d=="googlevideo.com" || d ~ /\.googlevideo\.com$/) return 0
+		   if(length(d)>253 || d !~ /^[a-z0-9.-]+$/ || d !~ /\./ || d ~ /^[0-9.]+$/) return 0
+	   n=split(d,a,"."); for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] !~ /^[a-z0-9]/ || a[i] !~ /[a-z0-9]$/) return 0
+	   return 1
+	 }
+	 { sub(/\r$/,""); sub(/#.*/,"") }
+	 $1=="0.0.0.0" || $1=="127.0.0.1" || $1=="::" || $1=="::1" {
+	   for(i=2;i<=NF;i++) { d=tolower($i); if(valid(d) && d!="localhost.localdomain" && d!="ip6-localhost" && d!="ip6-loopback") print d }
+	 }' "$WORK/raw" | sort -u > "$WORK/parsed"
+	[ -s "$WORK/parsed" ] || { fail empty_feed; return 1; }
+	local budget stamp
+	# Reserve the entire manual quota so later manual edits need not evict feed
+	# entries or fail merely because the feed filled the rule cap.
+	budget=$((MAX_RULES - MAX_MANUAL - 20))
+	stamp=$(date +%s)
+	printf '# updated=%s\n' "$stamp" > "$WORK/feed"
+	awk -v rows="$budget" -v bytes="$((MAX_FEED - 40))" 'NR<=rows && used+length($0)+1<=bytes { print; used+=length($0)+1 }' "$WORK/parsed" >> "$WORK/feed"
+	build_rules "$WORK/feed" "$BASE/block" "$BASE/allow" || { fail rules_or_syntax; return 1; }
+	apply_runtime on || { fail dns_apply_failed; return 1; }
+	persist "$WORK/feed" feed || { fail persist_failed; return 1; }
+	TX=0
+	job_state idle ok updated
+	say result=ok; say message=updated
+}
+update_start() {
+	lock || { fail busy; return 1; }
+	enabled || { fail disabled; return 1; }
+	job_alive && { fail busy; return 1; }
+	[ "$(mem_available)" -ge 14000 ] || { fail low_memory; return 1; }
+	rm -f "$PID"
+	job_state running ok starting
+	# A detached executable, not a background shell inheriting the RPC pipes.
+	start-stop-daemon -S -b -m -p "$PID" -x "$SELF" -O /tmp/adguard-lite-job.log -- update-run || {
+		job_state idle error launch_failed; fail launch_failed; return 1
+	}
+	say started
+}
+job() {
+	if job_alive; then
+		say state=running; say result=ok; say message=updating
+	elif [ -f "$JOB" ]; then
+		if grep -qx 'state=running' "$JOB"; then
+			say state=idle; say result=error; say message=job_interrupted
+		else cat "$JOB"; fi
+	else say state=idle; say result=ok; say message=idle
+	fi
+}
+boot_apply() {
+	lock || { fail busy; return 1; }
+	cron_sync || { fail cron_failed; return 1; }
+	if enabled; then
+		[ "$(mem_available)" -ge 8000 ] || { fail low_memory; return 1; }
+		build_rules "$BASE/feed" "$BASE/block" "$BASE/allow" || { fail rules_or_syntax; return 1; }
+		apply_runtime on || { fail dns_apply_failed; return 1; }
+		TX=0
+	else
+		find_snippet || return 1
+		if [ -f "$SNIPPET" ]; then apply_runtime off || return 1; TX=0; fi
+	fi
+	say result=ok; say message=applied
+}
+check_domain() {
+	local domain
+	case "$1" in *[!a-zA-Z0-9.-]*) fail invalid_domain; return 1;; esac
+	domain=$(canonical "$1")
+	valid_domain "$domain" || { fail invalid_domain; return 1; }
+	if ! enabled || ! find_snippet || [ ! -f "$SNIPPET" ]; then
+		say decision=none; say rule=; return 0
+	fi
+	awk -F/ -v domain="$domain" '
+	 /^server=\// { if($3=="#") a[$2]=1; else b[$2]=1 }
+	 END {
+	   d=domain; while(d!="") { if(d in a) { print "decision=allowed\nrule=" d; exit } if(!sub(/^[^.]+\./,"",d)) break }
+	   d=domain; while(d!="") { if(d in b) { print "decision=blocked\nrule=" d; exit } if(!sub(/^[^.]+\./,"",d)) break }
+	   print "decision=none\nrule="
+	 }' "$SNIPPET"
+}
+check_domains() {
+	local domains d n=0 runtime=/dev/null
+	case "$1" in ''|*[!a-zA-Z0-9.\ -]*) fail invalid_domain; return 1;; esac
+	domains=$(canonical "$1")
+	[ ${#domains} -le 15240 ] || { fail batch_limit; return 1; }
+	for d in $domains; do
+		n=$((n + 1))
+		[ "$n" -le 60 ] || { fail batch_limit; return 1; }
+		valid_domain "$d" || { fail invalid_domain; return 1; }
+	done
+	[ "$n" -gt 0 ] || { fail invalid_domain; return 1; }
+	if enabled && find_snippet && [ -f "$SNIPPET" ]; then runtime=$SNIPPET; fi
+	local allow=/dev/null block=/dev/null
+	[ ! -f "$BASE/allow" ] || allow=$BASE/allow
+	[ ! -f "$BASE/block" ] || block=$BASE/block
+	# Keep only candidate state in memory, not a second map of the full rule set.
+	awk -v domains="$domains" -v allow="$allow" -v block="$block" -v runtime="$runtime" '
+	 function covers(d,p) { return d==p || (length(d)>length(p) && substr(d,length(d)-length(p),1)=="." && substr(d,length(d)-length(p)+1)==p) }
+	 BEGIN { n=split(domains,q," ") }
+	 {
+	   if(FILENAME==runtime) {
+	     if($0 !~ /^server=\//) next
+	     split($0,r,"/"); p=r[2]; type=(r[3]=="#" ? "allow" : "live")
+	   } else { p=$0; type=(FILENAME==allow ? "allow" : "saved") }
+	   if(p=="") next
+	   for(i=1;i<=n;i++) if(covers(q[i],p)) {
+	     if(type=="allow" && length(p)>length(a[i])) a[i]=p
+	     else if(type=="saved" && length(p)>length(b[i])) b[i]=p
+	     else if(type=="live" && length(p)>length(c[i])) c[i]=p
+	   }
+	 }
+	 END {
+	   for(i=1;i<=n;i++) {
+	     if(a[i]!="") print q[i] "\tallowed\t" a[i]
+	     else if(b[i]==q[i]) print q[i] "\tadded\t" b[i]
+	     else if(b[i]!="") print q[i] "\tcovered\t" b[i]
+	     else if(c[i]!="") print q[i] "\tcovered\t" c[i]
+	     else print q[i] "\tnone\t"
+	   }
+	 }' "$allow" "$block" "$runtime"
+}
+case "$1" in
+	add|remove|batch-add) expected=3;;
+	check|checks) expected=2;;
+	*) expected=1;;
+esac
+[ "$#" = "$expected" ] || { fail invalid_arguments; exit 1; }
+case "$1" in
+	status) [ "$#" = 1 ] && status;;
+	lists) [ "$#" = 1 ] && list_rules;;
+	check) [ "$#" = 2 ] && check_domain "$2";;
+	checks) [ "$#" = 2 ] && check_domains "$2";;
+	add|remove|batch-add) [ "$#" = 3 ] && change_rule "$1" "$2" "$3";;
+	enable) [ "$#" = 1 ] && set_enabled 1;;
+	disable) [ "$#" = 1 ] && set_enabled 0;;
+	update-start) [ "$#" = 1 ] && update_start;;
+	update-run) [ "$#" = 1 ] && update_run;;
+	job) [ "$#" = 1 ] && job;;
+	apply) [ "$#" = 1 ] && boot_apply;;
+	*) fail invalid_command;;
+esac
